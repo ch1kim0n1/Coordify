@@ -1,0 +1,195 @@
+<svg viewBox="0 0 1200 420" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- Background -->
+  <rect width="1200" height="420" fill="#0C0E12"/>
+
+  <!-- ── CLI Header ── -->
+  <rect x="0" y="0" width="1200" height="48" fill="#13161D"/>
+  <line x1="0" y1="48" x2="1200" y2="48" stroke="#252A35" stroke-width="1"/>
+
+  <!-- Prompt -->
+  <text x="32" y="30"
+    font-family="ui-monospace,'SF Mono','Cascadia Code','Consolas',monospace"
+    font-size="13" fill="#6B7590">$</text>
+  <text x="48" y="30"
+    font-family="ui-monospace,'SF Mono','Cascadia Code','Consolas',monospace"
+    font-size="13" fill="#E8EDF5">coordify status</text>
+
+  <!-- Right-side session info -->
+  <text x="1168" y="20" text-anchor="end"
+    font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">session 2026-06-22_14:38</text>
+  <text x="1168" y="36" text-anchor="end"
+    font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">5 agents · 10 pairs · 1 conflict</text>
+
+  <!-- ── Network area ── -->
+  <!-- Nodes:
+       A = (340, 170)  ACTIVE    BUGFIX        AUTHENTICATION
+       B = (600,  88)  NEGOTIATING SECURITY    AUTHENTICATION
+       C = (860, 170)  ACTIVE    FEATURE       PAYMENTS
+       D = (800, 330)  IDLE
+       E = (400, 330)  TESTING   QA            AUTHENTICATION
+  -->
+
+  <!-- ── Edges ── -->
+
+  <!-- A↔C  14% SAFE (dashed, background edge) -->
+  <line x1="340" y1="170" x2="860" y2="170"
+    stroke="#00B8A9" stroke-width="1.2" opacity="0.3" stroke-dasharray="4,4"/>
+
+  <!-- D↔E  17% SAFE (dashed) -->
+  <line x1="800" y1="330" x2="400" y2="330"
+    stroke="#00B8A9" stroke-width="1.2" opacity="0.3" stroke-dasharray="4,4"/>
+
+  <!-- B↔C  19% SAFE -->
+  <line x1="600" y1="88" x2="860" y2="170"
+    stroke="#00B8A9" stroke-width="1.5" opacity="0.6"/>
+  <text x="748" y="114" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="10" fill="#00B8A9">19%</text>
+
+  <!-- C↔D  11% SAFE -->
+  <line x1="860" y1="170" x2="800" y2="330"
+    stroke="#00B8A9" stroke-width="1.5" opacity="0.6"/>
+  <text x="842" y="262" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="10" fill="#00B8A9">11%</text>
+
+  <!-- A↔B  52% OVERLAP -->
+  <line x1="340" y1="170" x2="600" y2="88"
+    stroke="#FF7043" stroke-width="2.5" opacity="0.8"/>
+  <text x="458" y="114" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="10" fill="#FF7043">52%</text>
+
+  <!-- B↔E  67% OVERLAP -->
+  <line x1="600" y1="88" x2="400" y2="330"
+    stroke="#FF7043" stroke-width="2.5" opacity="0.8"/>
+  <text x="480" y="222" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="10" fill="#FF7043">67%</text>
+
+  <!-- A↔E  84% CONFLICT — thickest, most prominent -->
+  <line x1="340" y1="170" x2="400" y2="330"
+    stroke="#E53935" stroke-width="3.5" opacity="0.9"/>
+  <!-- Conflict badge on the edge -->
+  <rect x="324" y="234" width="52" height="18" rx="3" fill="#E53935" opacity="0.15"/>
+  <text x="350" y="246" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="10" font-weight="700" fill="#E53935">84% !</text>
+
+  <!-- ── Nodes ── -->
+
+  <!-- Node A (340, 170) — ACTIVE — red-adjacent due to conflict -->
+  <circle cx="340" cy="170" r="44" fill="#0C0E12" stroke="#E53935" stroke-width="1.5" opacity="0.7"/>
+  <circle cx="340" cy="170" r="44" fill="#0C0E12" stroke="#E53935" stroke-width="1.5"/>
+  <text x="340" y="158" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">AGENT</text>
+  <text x="340" y="174" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="18" font-weight="700" fill="#E8EDF5">A</text>
+  <text x="340" y="188" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">BUGFIX</text>
+  <!-- State label below node -->
+  <rect x="296" y="222" width="88" height="18" rx="3" fill="#13161D" stroke="#252A35" stroke-width="1"/>
+  <text x="340" y="235" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#E8EDF5">ACTIVE</text>
+
+  <!-- Node B (600, 88) — NEGOTIATING -->
+  <circle cx="600" cy="88" r="44" fill="#0C0E12" stroke="#E53935" stroke-width="2"/>
+  <text x="600" y="76" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">AGENT</text>
+  <text x="600" y="92" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="18" font-weight="700" fill="#E8EDF5">B</text>
+  <text x="600" y="106" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">SECURITY</text>
+  <!-- State label below node -->
+  <rect x="540" y="140" width="120" height="18" rx="3" fill="#E53935" opacity="0.15" stroke="#E53935" stroke-width="1"/>
+  <text x="600" y="153" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#E53935">NEGOTIATING</text>
+
+  <!-- Node C (860, 170) — ACTIVE -->
+  <circle cx="860" cy="170" r="44" fill="#0C0E12" stroke="#252A35" stroke-width="1.5"/>
+  <text x="860" y="158" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">AGENT</text>
+  <text x="860" y="174" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="18" font-weight="700" fill="#E8EDF5">C</text>
+  <text x="860" y="188" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">FEATURE</text>
+  <rect x="816" y="222" width="88" height="18" rx="3" fill="#13161D" stroke="#252A35" stroke-width="1"/>
+  <text x="860" y="235" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#E8EDF5">ACTIVE</text>
+
+  <!-- Node D (800, 330) — IDLE -->
+  <circle cx="800" cy="330" r="44" fill="#0C0E12" stroke="#252A35" stroke-width="1.2" stroke-dasharray="5,3"/>
+  <text x="800" y="318" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">AGENT</text>
+  <text x="800" y="334" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="18" font-weight="700" fill="#6B7590">D</text>
+  <text x="800" y="348" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#252A35">———</text>
+  <rect x="766" y="382" width="68" height="18" rx="3" fill="#13161D" stroke="#252A35" stroke-width="1"/>
+  <text x="800" y="395" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">IDLE</text>
+
+  <!-- Node E (400, 330) — TESTING -->
+  <circle cx="400" cy="330" r="44" fill="#0C0E12" stroke="#E53935" stroke-width="1.5"/>
+  <text x="400" y="318" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">AGENT</text>
+  <text x="400" y="334" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="18" font-weight="700" fill="#E8EDF5">E</text>
+  <text x="400" y="348" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">QA</text>
+  <rect x="354" y="382" width="92" height="18" rx="3" fill="#13161D" stroke="#00B8A9" stroke-width="1"/>
+  <text x="400" y="395" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#00B8A9">TESTING</text>
+
+  <!-- ── Right sidebar: stats ── -->
+  <rect x="980" y="66" width="196" height="298" rx="6" fill="#13161D" stroke="#252A35" stroke-width="1"/>
+
+  <text x="1078" y="90" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="9" letter-spacing="1.5" fill="#6B7590">OWNERSHIP</text>
+
+  <!-- Domain claims -->
+  <rect x="996" y="100" width="164" height="20" rx="3" fill="#0C0E12"/>
+  <text x="1006" y="114" font-family="ui-monospace,monospace" font-size="9" fill="#FF7043">AUTHENTICATION</text>
+  <text x="1152" y="114" text-anchor="end" font-family="ui-monospace,monospace" font-size="9" fill="#E8EDF5">A E B</text>
+
+  <rect x="996" y="126" width="164" height="20" rx="3" fill="#0C0E12"/>
+  <text x="1006" y="140" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">PAYMENTS</text>
+  <text x="1152" y="140" text-anchor="end" font-family="ui-monospace,monospace" font-size="9" fill="#E8EDF5">C</text>
+
+  <rect x="996" y="152" width="164" height="20" rx="3" fill="#0C0E12"/>
+  <text x="1006" y="166" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">SECURITY</text>
+  <text x="1152" y="166" text-anchor="end" font-family="ui-monospace,monospace" font-size="9" fill="#E8EDF5">B</text>
+
+  <line x1="996" y1="184" x2="1160" y2="184" stroke="#252A35" stroke-width="1"/>
+
+  <text x="1078" y="204" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="9" letter-spacing="1.5" fill="#6B7590">HOT FILES</text>
+
+  <text x="996" y="222" font-family="ui-monospace,monospace" font-size="8" fill="#E53935">src/auth/session.ts</text>
+  <text x="996" y="238" font-family="ui-monospace,monospace" font-size="8" fill="#FF7043">src/auth/tokens.ts</text>
+  <text x="996" y="254" font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">tests/auth/session.test.ts</text>
+
+  <line x1="996" y1="268" x2="1160" y2="268" stroke="#252A35" stroke-width="1"/>
+
+  <text x="1078" y="288" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="9" letter-spacing="1.5" fill="#6B7590">PEAK HEAT</text>
+
+  <rect x="996" y="296" width="164" height="32" rx="4" fill="#E53935" opacity="0.1" stroke="#E53935" stroke-width="1"/>
+  <text x="1078" y="318" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="18" font-weight="700" fill="#E53935">84%</text>
+
+  <text x="1078" y="348" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">A ↔ E · CONFLICT CANDIDATE</text>
+
+  <!-- ── Bottom legend ── -->
+  <line x1="32" y1="408" x2="960" y2="408" stroke="#252A35" stroke-width="1" opacity="0.5"/>
+
+  <circle cx="50" cy="416" r="3.5" fill="#00B8A9"/>
+  <text x="60" y="419" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">SAFE  0–25%</text>
+
+  <circle cx="148" cy="416" r="3.5" fill="#F8C41A"/>
+  <text x="158" y="419" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">MONITOR  26–50%</text>
+
+  <circle cx="266" cy="416" r="3.5" fill="#FF7043"/>
+  <text x="276" y="419" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">OVERLAP  51–75%</text>
+
+  <circle cx="380" cy="416" r="3.5" fill="#E53935"/>
+  <text x="390" y="419" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">CONFLICT  76–100%</text>
+
+</svg>

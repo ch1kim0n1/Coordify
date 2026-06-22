@@ -1,0 +1,64 @@
+<svg viewBox="0 0 1200 120" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- Background -->
+  <rect width="1200" height="120" fill="#0C0E12"/>
+
+  <!-- Title -->
+  <text x="60" y="24"
+    font-family="ui-monospace,'SF Mono','Cascadia Code','Consolas',monospace"
+    font-size="9" letter-spacing="2" fill="#6B7590">HEAT SCALE · COORDIFY AGENT PROTOCOL</text>
+
+  <!--
+    Bar: x=60 to x=1140, y=36 to y=72
+    Width=1080, divided into 4 equal bands of 270px each
+  -->
+
+  <!-- SAFE band: x=60 to x=330 -->
+  <rect x="60"  y="36" width="270" height="36" rx="0" fill="#00B8A9" opacity="0.18"/>
+  <rect x="60"  y="36" width="270" height="36" rx="0" fill="none" stroke="#00B8A9" stroke-width="1" opacity="0.4"/>
+
+  <!-- MONITOR band: x=330 to x=600 -->
+  <rect x="330" y="36" width="270" height="36" fill="#F8C41A" opacity="0.15"/>
+  <rect x="330" y="36" width="270" height="36" fill="none" stroke="#F8C41A" stroke-width="1" opacity="0.3"/>
+
+  <!-- OVERLAP band: x=600 to x=870 -->
+  <rect x="600" y="36" width="270" height="36" fill="#FF7043" opacity="0.18"/>
+  <rect x="600" y="36" width="270" height="36" fill="none" stroke="#FF7043" stroke-width="1" opacity="0.3"/>
+
+  <!-- CONFLICT band: x=870 to x=1140 -->
+  <rect x="870" y="36" width="270" height="36" fill="#E53935" opacity="0.18"/>
+  <rect x="870" y="36" width="270" height="36" fill="none" stroke="#E53935" stroke-width="1" opacity="0.4"/>
+
+  <!-- Band labels — name -->
+  <text x="195"  y="58" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" font-weight="700" fill="#00B8A9">SAFE</text>
+  <text x="465"  y="58" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" font-weight="700" fill="#F8C41A">MONITOR</text>
+  <text x="735"  y="58" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" font-weight="700" fill="#FF7043">OVERLAP</text>
+  <text x="1005" y="58" text-anchor="middle" font-family="ui-monospace,monospace" font-size="12" font-weight="700" fill="#E53935">CONFLICT</text>
+
+  <!-- Percentage ranges below band names -->
+  <text x="195"  y="72" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">0 – 25%</text>
+  <text x="465"  y="72" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">26 – 50%</text>
+  <text x="735"  y="72" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">51 – 75%</text>
+  <text x="1005" y="72" text-anchor="middle" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">76 – 100%</text>
+
+  <!-- Tick marks at band boundaries -->
+  <line x1="330"  y1="36" x2="330"  y2="80" stroke="#252A35" stroke-width="1"/>
+  <line x1="600"  y1="36" x2="600"  y2="80" stroke="#252A35" stroke-width="1"/>
+  <line x1="870"  y1="36" x2="870"  y2="80" stroke="#252A35" stroke-width="1"/>
+
+  <!-- Threshold labels -->
+  <text x="330"  y="92" text-anchor="middle" font-family="ui-monospace,monospace" font-size="8" fill="#252A35">25%</text>
+  <text x="600"  y="92" text-anchor="middle" font-family="ui-monospace,monospace" font-size="8" fill="#252A35">50%</text>
+  <text x="870"  y="92" text-anchor="middle" font-family="ui-monospace,monospace" font-size="8" fill="#252A35">75%</text>
+
+  <!-- Action descriptors under range labels -->
+  <text x="195"  y="104" text-anchor="middle" font-family="ui-monospace,monospace" font-size="7" fill="#252A35">no action</text>
+  <text x="465"  y="104" text-anchor="middle" font-family="ui-monospace,monospace" font-size="7" fill="#252A35">observe + warn</text>
+  <text x="735"  y="104" text-anchor="middle" font-family="ui-monospace,monospace" font-size="7" fill="#252A35">coordinate required</text>
+  <text x="1005" y="104" text-anchor="middle" font-family="ui-monospace,monospace" font-size="7" fill="#252A35">negotiate or reassign</text>
+
+  <!-- Left and right edge markers -->
+  <text x="60"   y="92" text-anchor="middle" font-family="ui-monospace,monospace" font-size="8" fill="#252A35">0%</text>
+  <text x="1140" y="92" text-anchor="middle" font-family="ui-monospace,monospace" font-size="8" fill="#252A35">100%</text>
+
+</svg>

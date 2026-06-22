@@ -1,0 +1,142 @@
+<svg viewBox="0 0 1200 280" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- Background -->
+  <rect width="1200" height="280" fill="#0C0E12"/>
+
+  <!-- Subtle grid -->
+  <defs>
+    <pattern id="g" width="48" height="48" patternUnits="userSpaceOnUse">
+      <path d="M 48 0 L 0 0 0 48" fill="none" stroke="#ffffff" stroke-width="0.4" opacity="0.03"/>
+    </pattern>
+    <linearGradient id="fade" x1="0" x2="1" y1="0" y2="0">
+      <stop offset="0%" stop-color="#0C0E12" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#0C0E12" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+  <rect width="1200" height="280" fill="url(#g)"/>
+
+  <!-- ── LEFT: text ── -->
+
+  <!-- Wordmark -->
+  <text x="60" y="92"
+    font-family="ui-monospace,'SF Mono','Cascadia Code','Consolas',monospace"
+    font-size="66" font-weight="800" fill="#E8EDF5" letter-spacing="-2">COORDIFY</text>
+
+  <!-- Protocol pill -->
+  <rect x="62" y="103" width="68" height="20" rx="3" fill="#13161D" stroke="#252A35" stroke-width="1"/>
+  <text x="96" y="117"
+    text-anchor="middle"
+    font-family="ui-monospace,monospace"
+    font-size="9" letter-spacing="1" fill="#6B7590">CAP v1</text>
+
+  <!-- Description -->
+  <text x="62" y="151"
+    font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+    font-size="16" fill="#6B7590">Multi-agent coordination layer for Claude Code terminals.</text>
+
+  <!-- Tagline -->
+  <text x="62" y="185"
+    font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Helvetica,Arial,sans-serif"
+    font-size="20" font-weight="500" fill="#E8EDF5">Know. Predict. Coordinate.</text>
+
+  <!-- Feature tags -->
+  <rect x="62" y="208" width="82" height="22" rx="3" fill="#13161D" stroke="#252A35" stroke-width="1"/>
+  <text x="103" y="223" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">local-first</text>
+
+  <rect x="152" y="208" width="100" height="22" rx="3" fill="#13161D" stroke="#252A35" stroke-width="1"/>
+  <text x="202" y="223" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">session-aware</text>
+
+  <rect x="260" y="208" width="102" height="22" rx="3" fill="#13161D" stroke="#252A35" stroke-width="1"/>
+  <text x="311" y="223" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">heat-scored</text>
+
+  <rect x="370" y="208" width="112" height="22" rx="3" fill="#13161D" stroke="#252A35" stroke-width="1"/>
+  <text x="426" y="223" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">conflict-aware</text>
+
+  <!-- ── RIGHT: network panel ── -->
+  <rect x="570" y="18" width="598" height="244" rx="6" fill="#13161D" stroke="#252A35" stroke-width="1"/>
+
+  <!-- Panel header -->
+  <text x="869" y="44" text-anchor="middle"
+    font-family="ui-monospace,monospace"
+    font-size="9" letter-spacing="2" fill="#6B7590">LIVE NETWORK · 4 AGENTS</text>
+
+  <!-- Diamond nodes:
+       A = top    (869,  72)
+       B = right  (1058, 152)
+       C = bottom (869,  234)
+       D = left   (680,  152)
+  -->
+
+  <!-- ── Edges (drawn behind nodes) ── -->
+
+  <!-- D→A  58% OVERLAP -->
+  <line x1="680" y1="152" x2="869" y2="72" stroke="#FF7043" stroke-width="2.2" opacity="0.75"/>
+  <text x="757" y="99" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="10" fill="#FF7043">58%</text>
+
+  <!-- A→B  82% CONFLICT -->
+  <line x1="869" y1="72" x2="1058" y2="152" stroke="#E53935" stroke-width="2.8" opacity="0.8"/>
+  <text x="972" y="97" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="10" fill="#E53935">82%</text>
+
+  <!-- B→C  34% MONITOR -->
+  <line x1="1058" y1="152" x2="869" y2="234" stroke="#F8C41A" stroke-width="1.8" opacity="0.75"/>
+  <text x="972" y="207" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="10" fill="#F8C41A">34%</text>
+
+  <!-- C→D  11% SAFE -->
+  <line x1="869" y1="234" x2="680" y2="152" stroke="#00B8A9" stroke-width="1.5" opacity="0.75"/>
+  <text x="766" y="210" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="10" fill="#00B8A9">11%</text>
+
+  <!-- ── Nodes ── -->
+
+  <!-- Node A — top — NEGOTIATING (red border) -->
+  <circle cx="869" cy="72" r="30" fill="#0C0E12" stroke="#E53935" stroke-width="1.8"/>
+  <text x="869" y="66" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">AGENT</text>
+  <text x="869" y="81" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="15" font-weight="700" fill="#E8EDF5">A</text>
+
+  <!-- Node B — right — ACTIVE -->
+  <circle cx="1058" cy="152" r="30" fill="#0C0E12" stroke="#E53935" stroke-width="1.8"/>
+  <text x="1058" y="146" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">AGENT</text>
+  <text x="1058" y="161" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="15" font-weight="700" fill="#E8EDF5">B</text>
+
+  <!-- Node C — bottom — ACTIVE -->
+  <circle cx="869" cy="234" r="30" fill="#0C0E12" stroke="#252A35" stroke-width="1.5"/>
+  <text x="869" y="228" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">AGENT</text>
+  <text x="869" y="243" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="15" font-weight="700" fill="#E8EDF5">C</text>
+
+  <!-- Node D — left — ACTIVE -->
+  <circle cx="680" cy="152" r="30" fill="#0C0E12" stroke="#252A35" stroke-width="1.5"/>
+  <text x="680" y="146" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="8" fill="#6B7590">AGENT</text>
+  <text x="680" y="161" text-anchor="middle"
+    font-family="ui-monospace,monospace" font-size="15" font-weight="700" fill="#E8EDF5">D</text>
+
+  <!-- Legend -->
+  <circle cx="598" cy="252" r="3.5" fill="#00B8A9"/>
+  <text x="607" y="256" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">SAFE</text>
+
+  <circle cx="648" cy="252" r="3.5" fill="#F8C41A"/>
+  <text x="657" y="256" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">MONITOR</text>
+
+  <circle cx="718" cy="252" r="3.5" fill="#FF7043"/>
+  <text x="727" y="256" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">OVERLAP</text>
+
+  <circle cx="790" cy="252" r="3.5" fill="#E53935"/>
+  <text x="799" y="256" font-family="ui-monospace,monospace" font-size="9" fill="#6B7590">CONFLICT</text>
+
+  <!-- Fade overlay on left edge of panel -->
+  <rect x="570" y="18" width="30" height="244" rx="0" fill="url(#fade)"/>
+
+</svg>

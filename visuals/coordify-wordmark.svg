@@ -1,0 +1,60 @@
+<svg viewBox="0 0 420 90" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- Dark background -->
+  <rect width="420" height="90" rx="12" fill="#0C0E12"/>
+
+  <!--
+    Symbol: 72x72, centered vertically in 90px height → y-offset = (90-72)/2 = 9
+    Scale factor: 72/200 = 0.36
+
+    Scaled node positions (original * 0.36, y + 9):
+      N1  (159*0.36, 42*0.36+9)  = (57.2, 24.1)  → (57, 24)
+      N2  ( 73*0.36, 38*0.36+9)  = (26.3, 22.7)  → (26, 23)
+      N3  ( 41*0.36,100*0.36+9)  = (14.8, 45.0)  → (15, 45)
+      N4  ( 73*0.36,162*0.36+9)  = (26.3, 67.3)  → (26, 67)
+      N5  (159*0.36,158*0.36+9)  = (57.2, 65.9)  → (57, 66)
+
+    Node r = 13*0.36 = 4.7 → 5
+    Inner r = 5*0.36 = 1.8 → 2
+    Edge stroke-width = 4*0.36 = 1.44 → 1.5
+  -->
+
+  <!-- ── Symbol ── -->
+
+  <!-- Edges -->
+  <line x1="57" y1="24" x2="26" y2="23" stroke="#00B8A9" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="26" y1="23" x2="15" y2="45" stroke="#F8C41A" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="15" y1="45" x2="26" y2="67" stroke="#FF7043" stroke-width="1.5" stroke-linecap="round"/>
+  <line x1="26" y1="67" x2="57" y2="66" stroke="#E53935" stroke-width="1.5" stroke-linecap="round"/>
+
+  <!-- Nodes -->
+  <!-- N1 teal terminal -->
+  <circle cx="57" cy="24" r="5" fill="#00B8A9"/>
+  <circle cx="57" cy="24" r="2" fill="#0C0E12"/>
+
+  <!-- N2 neutral -->
+  <circle cx="26" cy="23" r="5" fill="#E8EDF5"/>
+  <circle cx="26" cy="23" r="2" fill="#0C0E12"/>
+
+  <!-- N3 neutral (leftmost) -->
+  <circle cx="15" cy="45" r="5" fill="#E8EDF5"/>
+  <circle cx="15" cy="45" r="2" fill="#0C0E12"/>
+
+  <!-- N4 neutral -->
+  <circle cx="26" cy="67" r="5" fill="#E8EDF5"/>
+  <circle cx="26" cy="67" r="2" fill="#0C0E12"/>
+
+  <!-- N5 red terminal -->
+  <circle cx="57" cy="66" r="5" fill="#E53935"/>
+  <circle cx="57" cy="66" r="2" fill="#0C0E12"/>
+
+  <!-- ── Wordmark text ── -->
+  <!-- "COORDIFY" — x=82 gives 25px gap after the 57px symbol -->
+  <text
+    x="82" y="59"
+    font-family="ui-monospace,'SF Mono','Cascadia Code','Consolas',monospace"
+    font-size="42" font-weight="800"
+    fill="#E8EDF5"
+    letter-spacing="-1">COORDIFY</text>
+
+</svg>

@@ -1,0 +1,38 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+
+  <!--
+    Light / transparent background version.
+    Nodes use dark fill (#0C0E12) so they read on white.
+    Edge colors unchanged — heat palette reads on both backgrounds.
+    Transparent background (no rect) so it floats on any surface.
+  -->
+
+  <!-- ── Edges ── -->
+  <line x1="159" y1="42"  x2="73"  y2="38"  stroke="#00B8A9" stroke-width="4" stroke-linecap="round"/>
+  <line x1="73"  y1="38"  x2="41"  y2="100" stroke="#F8C41A" stroke-width="4" stroke-linecap="round"/>
+  <line x1="41"  y1="100" x2="73"  y2="162" stroke="#FF7043" stroke-width="4" stroke-linecap="round"/>
+  <line x1="73"  y1="162" x2="159" y2="158" stroke="#E53935" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- ── Nodes ── -->
+
+  <!-- N1 — teal terminal -->
+  <circle cx="159" cy="42"  r="13" fill="#00B8A9"/>
+  <circle cx="159" cy="42"  r="5"  fill="#ffffff"/>
+
+  <!-- N2 — neutral junction -->
+  <circle cx="73"  cy="38"  r="13" fill="#0C0E12"/>
+  <circle cx="73"  cy="38"  r="5"  fill="#ffffff"/>
+
+  <!-- N3 — neutral junction -->
+  <circle cx="41"  cy="100" r="13" fill="#0C0E12"/>
+  <circle cx="41"  cy="100" r="5"  fill="#ffffff"/>
+
+  <!-- N4 — neutral junction -->
+  <circle cx="73"  cy="162" r="13" fill="#0C0E12"/>
+  <circle cx="73"  cy="162" r="5"  fill="#ffffff"/>
+
+  <!-- N5 — red terminal -->
+  <circle cx="159" cy="158" r="13" fill="#E53935"/>
+  <circle cx="159" cy="158" r="5"  fill="#ffffff"/>
+
+</svg>

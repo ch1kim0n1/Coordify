@@ -1,0 +1,53 @@
+<svg viewBox="0 0 200 200" xmlns="http://www.w3.org/2000/svg">
+
+  <!-- Dark background tile -->
+  <rect width="200" height="200" rx="24" fill="#0C0E12"/>
+
+  <!--
+    C-network mark.
+    5 agent nodes in a C formation, 4 heat-colored edges.
+    C opens to the RIGHT.
+
+    Node positions (centered in 200x200):
+      N1  top-right    (159, 42)   — terminal node, teal
+      N2  top-left     ( 73, 38)   — junction, neutral
+      N3  left-middle  ( 41,100)   — junction, neutral
+      N4  bottom-left  ( 73,162)   — junction, neutral
+      N5  bottom-right (159,158)   — terminal node, red
+
+    Edges:
+      N1→N2  teal   #00B8A9  — SAFE
+      N2→N3  amber  #F8C41A  — MONITOR
+      N3→N4  orange #FF7043  — OVERLAP
+      N4→N5  red    #E53935  — CONFLICT
+  -->
+
+  <!-- ── Edges ── -->
+  <line x1="159" y1="42"  x2="73"  y2="38"  stroke="#00B8A9" stroke-width="4" stroke-linecap="round"/>
+  <line x1="73"  y1="38"  x2="41"  y2="100" stroke="#F8C41A" stroke-width="4" stroke-linecap="round"/>
+  <line x1="41"  y1="100" x2="73"  y2="162" stroke="#FF7043" stroke-width="4" stroke-linecap="round"/>
+  <line x1="73"  y1="162" x2="159" y2="158" stroke="#E53935" stroke-width="4" stroke-linecap="round"/>
+
+  <!-- ── Nodes ── -->
+
+  <!-- N1 — teal terminal (entry point) -->
+  <circle cx="159" cy="42"  r="13" fill="#00B8A9"/>
+  <circle cx="159" cy="42"  r="5"  fill="#0C0E12"/>
+
+  <!-- N2 — neutral junction -->
+  <circle cx="73"  cy="38"  r="13" fill="#E8EDF5"/>
+  <circle cx="73"  cy="38"  r="5"  fill="#0C0E12"/>
+
+  <!-- N3 — neutral junction (leftmost point) -->
+  <circle cx="41"  cy="100" r="13" fill="#E8EDF5"/>
+  <circle cx="41"  cy="100" r="5"  fill="#0C0E12"/>
+
+  <!-- N4 — neutral junction -->
+  <circle cx="73"  cy="162" r="13" fill="#E8EDF5"/>
+  <circle cx="73"  cy="162" r="5"  fill="#0C0E12"/>
+
+  <!-- N5 — red terminal (conflict point) -->
+  <circle cx="159" cy="158" r="13" fill="#E53935"/>
+  <circle cx="159" cy="158" r="5"  fill="#0C0E12"/>
+
+</svg>
