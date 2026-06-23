@@ -37,6 +37,9 @@ impl Paths {
     pub fn session_dir(&self, id: &str) -> PathBuf {
         self.sessions().join(id)
     }
+    pub fn knowledge_dir(&self) -> PathBuf {
+        self.coordify().join("knowledge")
+    }
 }
 
 #[cfg(test)]
