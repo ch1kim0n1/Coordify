@@ -188,3 +188,42 @@ fn reaper_logs_agent_lost_for_silent_agent() {
     // Keep the stream alive until assertions are done.
     drop(stream);
 }
+
+#[test]
+fn reaper_finalizes_when_last_silent_agent_times_out() {
+    let core = spawn_core_fast_reaper("rfin");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = UnixStream::connect(&sock).unwrap();
+    let reg = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
+        token
+    );
+    let resp = send_line(&mut stream, &reg);
+    assert_eq!(resp["ok"], true);
+
+    // Keep the stream OPEN and send no heartbeats. The reaper (300ms timeout)
+    // should reap the silent agent, empty the network, finalize, and exit.
+    let sessions = core.root.join(".coordify/sessions");
+    let start = Instant::now();
+    let mut finalized = false;
+    while start.elapsed() < Duration::from_secs(5) {
+        if let Ok(entries) = std::fs::read_dir(&sessions) {
+            for e in entries.flatten() {
+                if e.path().join("network-final.json").exists() {
+                    finalized = true;
+                }
+            }
+        }
+        if finalized {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(finalized, "reaper did not finalize after last silent agent timed out");
+    assert!(
+        !core.root.join(".coordify/runtime/core.lock").exists(),
+        "lock not removed by finalize"
+    );
+    drop(stream);
+}

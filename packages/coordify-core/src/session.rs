@@ -2,6 +2,7 @@ use crate::paths::Paths;
 use std::fs;
 use std::path::PathBuf;
 
+#[derive(Clone)]
 pub struct Session {
     pub id: String,
     pub dir: PathBuf,

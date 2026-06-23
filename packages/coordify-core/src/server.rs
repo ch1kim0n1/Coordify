@@ -5,6 +5,7 @@ use crate::session::{finalize, Session};
 use crate::state::{now_ms, State};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
+use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
 
 pub struct Shared {
@@ -12,6 +13,7 @@ pub struct Shared {
     pub log: Mutex<EventLog>,
     pub token: String,
     pub agents_seen: Mutex<u64>,
+    pub finalized: AtomicBool,
 }
 
 pub fn handle_request(shared: &Shared, req: &Request) -> Response {
@@ -130,6 +132,7 @@ pub fn run(
         log: Mutex::new(log),
         token,
         agents_seen: Mutex::new(0),
+        finalized: AtomicBool::new(false),
     });
 
     let interval_ms = std::env::var("COORDIFY_REAPER_INTERVAL_MS")
@@ -140,7 +143,13 @@ pub fn run(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10_000);
-    let _reaper = spawn_reaper(Arc::clone(&shared), interval_ms, timeout_ms);
+    let _reaper = spawn_reaper(
+        Arc::clone(&shared),
+        session.clone(),
+        Paths::new(paths.root.clone()),
+        interval_ms,
+        timeout_ms,
+    );
 
     for conn in listener.incoming() {
         let stream = match conn {
@@ -154,8 +163,13 @@ pub fn run(
         // Phase 2 replaces this with a shared reaper-driven shutdown signal.
         if let Ok(network_empty) = handle.join() {
             let seen = *shared.agents_seen.lock().unwrap();
-            if network_empty && seen > 0 {
+            if network_empty && seen > 0
+                && shared.finalized.compare_exchange(false, true, SeqCst, SeqCst).is_ok()
+            {
                 finalize(&session, &paths, seen)?;
+                break;
+            } else if network_empty && seen > 0 {
+                // Reaper already finalized + is exiting; just stop the loop.
                 break;
             }
         }
@@ -165,6 +179,8 @@ pub fn run(
 
 pub fn spawn_reaper(
     shared: Arc<Shared>,
+    session: Session,
+    paths: Paths,
     interval_ms: u64,
     timeout_ms: u64,
 ) -> std::thread::JoinHandle<()> {
@@ -174,18 +190,30 @@ pub fn spawn_reaper(
             let mut st = shared.state.lock().unwrap();
             st.reap(now_ms(), timeout_ms)
         };
-        for id in lost {
+        if !lost.is_empty() {
+            // Hold the log lock once for the whole batch so each (LOST, ORPHANED)
+            // pair is contiguous in the log.
             let mut log = shared.log.lock().unwrap();
-            let _ = log.append(&serde_json::json!({
-                "type": "AGENT_LOST",
-                "agentId": id,
-                "ts": crate::bootstrap::now_iso(),
-            }));
-            let _ = log.append(&serde_json::json!({
-                "type": "CLAIM_ORPHANED",
-                "agentId": id,
-                "ts": crate::bootstrap::now_iso(),
-            }));
+            for id in &lost {
+                let _ = log.append(&serde_json::json!({
+                    "type": "AGENT_LOST", "agentId": id, "ts": crate::bootstrap::now_iso(),
+                }));
+                let _ = log.append(&serde_json::json!({
+                    "type": "CLAIM_ORPHANED", "agentId": id, "ts": crate::bootstrap::now_iso(),
+                }));
+            }
+        }
+        // If the reaper just emptied a network that had agents, finalize and exit:
+        // the serialized accept loop may be blocked on join() of a silent agent's
+        // still-open connection and cannot finalize on its own.
+        let empty = shared.state.lock().unwrap().agent_count() == 0;
+        let seen = *shared.agents_seen.lock().unwrap();
+        if empty
+            && seen > 0
+            && shared.finalized.compare_exchange(false, true, SeqCst, SeqCst).is_ok()
+        {
+            let _ = finalize(&session, &paths, seen);
+            std::process::exit(0);
         }
     })
 }
@@ -209,6 +237,7 @@ mod tests {
             log: Mutex::new(log),
             token: token.to_string(),
             agents_seen: Mutex::new(0),
+            finalized: AtomicBool::new(false),
         })
     }
 

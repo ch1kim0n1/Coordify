@@ -47,8 +47,12 @@ fn parse_root() -> std::path::PathBuf {
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         if arg == "--root" {
-            if let Some(p) = args.next() {
-                return std::path::PathBuf::from(p);
+            match args.next() {
+                Some(p) => return std::path::PathBuf::from(p),
+                None => {
+                    eprintln!("coordify-core: --root requires a path argument");
+                    std::process::exit(1);
+                }
             }
         }
     }
