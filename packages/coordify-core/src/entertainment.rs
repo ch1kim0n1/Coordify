@@ -33,6 +33,7 @@ pub struct Superlative {
 }
 
 #[derive(Serialize, Default)]
+#[serde(rename_all = "camelCase")]
 pub struct Streaks {
     pub longest_auto_resolve_streak: u64,
     pub longest_completion_streak: u64,
@@ -63,6 +64,23 @@ fn parse_ms(ts: &str) -> Option<i64> {
     chrono::DateTime::parse_from_rfc3339(ts)
         .ok()
         .map(|dt| dt.timestamp_millis())
+}
+
+/// Longest run of consecutive `true` values in a sequence of bools.
+fn longest_run(flags: impl Iterator<Item = bool>) -> u64 {
+    let mut cur: u64 = 0;
+    let mut max: u64 = 0;
+    for hit in flags {
+        if hit {
+            cur += 1;
+            if cur > max {
+                max = cur;
+            }
+        } else {
+            cur = 0;
+        }
+    }
+    max
 }
 
 fn ordered_pair(a: &str, b: &str) -> (String, String) {
@@ -168,12 +186,6 @@ pub fn build_entertainment(events: &[Value], stats: &SessionStats) -> Entertainm
     // agent -> (total_ms, count)
     let mut claim_durations: BTreeMap<String, (i64, u64)> = BTreeMap::new();
 
-    // Streaks
-    let mut auto_resolve_streak: u64 = 0;
-    let mut auto_resolve_max: u64 = 0;
-    let mut completion_streak: u64 = 0;
-    let mut completion_max: u64 = 0;
-
     for e in events {
         // Bloodiest minute: bucket every event
         if let Some(ms) = e.get("ts").and_then(|v| v.as_str()).and_then(parse_ms) {
@@ -182,50 +194,6 @@ pub fn build_entertainment(events: &[Value], stats: &SessionStats) -> Entertainm
         }
 
         let etype = ev_type(e);
-
-        // Streak tracking — conflict outcomes
-        match etype {
-            "CONFLICT_RESOLVED"
-            | "CONFLICT_ESCALATED"
-            | "CONFLICT_TIMEOUT"
-            | "CONFLICT_ABORTED" => {
-                if etype == "CONFLICT_RESOLVED" {
-                    auto_resolve_streak += 1;
-                    if auto_resolve_streak > auto_resolve_max {
-                        auto_resolve_max = auto_resolve_streak;
-                    }
-                } else {
-                    auto_resolve_streak = 0;
-                }
-            }
-            _ => {}
-        }
-
-        // Completion streak
-        if etype == "CLAIM_RELEASED" {
-            if ev_str(e, "reason") == "TASK_COMPLETED" {
-                completion_streak += 1;
-                if completion_streak > completion_max {
-                    completion_max = completion_streak;
-                }
-            } else {
-                completion_streak = 0;
-            }
-        } else if etype != "CONFLICT_RESOLVED"
-            && etype != "CONFLICT_ESCALATED"
-            && etype != "CONFLICT_TIMEOUT"
-            && etype != "CONFLICT_ABORTED"
-        {
-            // Only conflict-outcome events and CLAIM_RELEASED are in the completion run;
-            // any other event type resets the completion streak.
-            // Per spec: "longest run of consecutive CLAIM_RELEASED events whose reason is TASK_COMPLETED"
-            // "consecutive" means no intervening non-matching events break it.
-            // But the spec says consecutive CLAIM_RELEASED — other events between them break the run.
-            // Reset only when a non-CLAIM_RELEASED event appears.
-            if etype != "CLAIM_RELEASED" {
-                completion_streak = 0;
-            }
-        }
 
         match etype {
             "FILE_TOUCHED" => {
@@ -274,7 +242,7 @@ pub fn build_entertainment(events: &[Value], stats: &SessionStats) -> Entertainm
             }
             "CONFLICT_PROPOSAL_RECEIVED" => {
                 let kind = ev_str(e, "kind");
-                if kind == "YIELD_CLAIM" || kind.starts_with("CO_OWN") || kind == "CO_OWNERSHIP" {
+                if kind == "YIELD_CLAIM" || kind == "CO_OWN" || kind == "CO_OWNERSHIP" {
                     let from = ev_str(e, "from");
                     if !from.is_empty() {
                         *diplomat_count.entry(from).or_insert(0) += 1;
@@ -636,8 +604,33 @@ pub fn build_entertainment(events: &[Value], stats: &SessionStats) -> Entertainm
     }
 
     // -----------------------------------------------------------------------
-    // Streaks
+    // Streaks — two independent subsequence passes (each over its own class)
     // -----------------------------------------------------------------------
+
+    // Auto-resolve: filter to conflict-outcome events, longest run of CONFLICT_RESOLVED.
+    let auto_resolve_max = longest_run(
+        events
+            .iter()
+            .map(ev_type)
+            .filter(|t| {
+                matches!(
+                    *t,
+                    "CONFLICT_RESOLVED"
+                        | "CONFLICT_ESCALATED"
+                        | "CONFLICT_TIMEOUT"
+                        | "CONFLICT_ABORTED"
+                )
+            })
+            .map(|t| t == "CONFLICT_RESOLVED"),
+    );
+
+    // Completion: filter to CLAIM_RELEASED events, longest run with reason==TASK_COMPLETED.
+    let completion_max = longest_run(
+        events
+            .iter()
+            .filter(|e| ev_type(e) == "CLAIM_RELEASED")
+            .map(|e| ev_str(e, "reason") == "TASK_COMPLETED"),
+    );
 
     let streaks = Streaks {
         longest_auto_resolve_streak: auto_resolve_max,
@@ -796,6 +789,22 @@ mod tests {
         let e = build_entertainment(&evs, &stats);
         assert_eq!(e.streaks.longest_auto_resolve_streak, 1);
         assert_eq!(e.streaks.longest_completion_streak, 1);
+    }
+
+    #[test]
+    fn streaks_ignore_intervening_events_of_other_classes() {
+        use serde_json::json;
+        let evs = vec![
+            json!({"type":"CLAIM_RELEASED","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:00Z"}),
+            json!({"type":"HEAT_UPDATED","pair":["a","b"],"heat":10,"band":"SAFE","ts":"2026-06-23T00:00:01Z"}),
+            json!({"type":"CLAIM_RELEASED","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:02Z"}),
+            json!({"type":"CLAIM_RELEASED","reason":"SESSION_END","ts":"2026-06-23T00:00:03Z"}),
+            json!({"type":"CLAIM_RELEASED","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:04Z"}),
+        ];
+        let stats = crate::stats::summarize(&evs);
+        let e = build_entertainment(&evs, &stats);
+        // intervening HEAT_UPDATED is ignored -> first two completed are consecutive -> streak 2; then SESSION_END breaks it
+        assert_eq!(e.streaks.longest_completion_streak, 2);
     }
 
     #[test]
