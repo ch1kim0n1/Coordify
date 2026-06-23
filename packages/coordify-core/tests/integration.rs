@@ -29,6 +29,25 @@ fn wait_for(path: &Path, timeout: Duration) -> bool {
     false
 }
 
+/// Connect to the socket, retrying until the listener is actually accepting.
+/// `UnixListener::bind` creates the socket file (bind syscall) a moment before
+/// it calls listen, so the file existing is not sufficient readiness — a
+/// connect in that window gets ECONNREFUSED. Retry the connect itself.
+fn connect_retry(sock: &Path) -> UnixStream {
+    let start = Instant::now();
+    loop {
+        match UnixStream::connect(sock) {
+            Ok(s) => return s,
+            Err(e) => {
+                if start.elapsed() > Duration::from_secs(5) {
+                    panic!("could not connect to {} within 5s: {e}", sock.display());
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+        }
+    }
+}
+
 fn read_token(root: &Path) -> String {
     let p = root.join(".coordify/runtime/session.token");
     assert!(wait_for(&p, Duration::from_secs(5)), "token never written");
@@ -88,7 +107,7 @@ fn register_and_heartbeat_over_socket() {
     let core = spawn_core("reg");
     let token = read_token(&core.root);
     let sock = core.root.join(".coordify/runtime/core.sock");
-    let mut stream = UnixStream::connect(&sock).unwrap();
+    let mut stream = connect_retry(&sock);
 
     let reg = format!(
         r#"{{"id":"1","token":"{}","action":"register","meta":{{"task":"auth"}}}}"#,
@@ -111,7 +130,7 @@ fn register_and_heartbeat_over_socket() {
 fn rejects_bad_token_over_socket() {
     let core = spawn_core("badtok");
     let sock = core.root.join(".coordify/runtime/core.sock");
-    let mut stream = UnixStream::connect(&sock).unwrap();
+    let mut stream = connect_retry(&sock);
     let reg = r#"{"id":"1","token":"WRONG","action":"register","meta":{}}"#;
     let resp = send_line(&mut stream, reg);
     assert_eq!(resp["ok"], false);
@@ -125,7 +144,7 @@ fn last_agent_leaving_finalizes_session() {
     let sock = core.root.join(".coordify/runtime/core.sock");
 
     {
-        let mut stream = UnixStream::connect(&sock).unwrap();
+        let mut stream = connect_retry(&sock);
         let reg = format!(
             r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
             token
@@ -135,10 +154,14 @@ fn last_agent_leaving_finalizes_session() {
         // Drop the stream -> agent leaves -> network empty -> finalize.
     }
 
-    // network-final.json should appear under some session dir.
+    // network-final.json should appear under some session dir, and the lock
+    // should be removed. finalize() writes the summary before removing the
+    // lock, so poll for BOTH to avoid observing the in-between window.
     let sessions = core.root.join(".coordify/sessions");
+    let lock = core.root.join(".coordify/runtime/core.lock");
     let start = Instant::now();
     let mut found = false;
+    let mut lock_gone = false;
     while start.elapsed() < Duration::from_secs(5) {
         if let Ok(entries) = std::fs::read_dir(&sessions) {
             for e in entries.flatten() {
@@ -147,14 +170,14 @@ fn last_agent_leaving_finalizes_session() {
                 }
             }
         }
-        if found {
+        lock_gone = !lock.exists();
+        if found && lock_gone {
             break;
         }
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(found, "session was not finalized after last agent left");
-    // Lock should be gone after finalize.
-    assert!(!core.root.join(".coordify/runtime/core.lock").exists());
+    assert!(lock_gone, "lock not removed after finalize");
 }
 
 #[test]
@@ -165,7 +188,7 @@ fn reaper_logs_agent_lost_for_silent_agent() {
 
     // Register, then keep the connection OPEN but send no heartbeats so the
     // reaper times the agent out while it is still "connected".
-    let mut stream = UnixStream::connect(&sock).unwrap();
+    let mut stream = connect_retry(&sock);
     let reg = format!(
         r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
         token
@@ -199,7 +222,7 @@ fn reaper_finalizes_when_last_silent_agent_times_out() {
     let core = spawn_core_fast_reaper("rfin");
     let token = read_token(&core.root);
     let sock = core.root.join(".coordify/runtime/core.sock");
-    let mut stream = UnixStream::connect(&sock).unwrap();
+    let mut stream = connect_retry(&sock);
     let reg = format!(
         r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
         token
@@ -210,8 +233,13 @@ fn reaper_finalizes_when_last_silent_agent_times_out() {
     // Keep the stream OPEN and send no heartbeats. The reaper (300ms timeout)
     // should reap the silent agent, empty the network, finalize, and exit.
     let sessions = core.root.join(".coordify/sessions");
+    let lock = core.root.join(".coordify/runtime/core.lock");
     let start = Instant::now();
     let mut finalized = false;
+    let mut lock_gone = false;
+    // finalize() writes network-final.json FIRST, then removes the runtime
+    // files (lock among them). Poll for BOTH so we never observe the window
+    // where the summary exists but the lock is not yet removed.
     while start.elapsed() < Duration::from_secs(5) {
         if let Ok(entries) = std::fs::read_dir(&sessions) {
             for e in entries.flatten() {
@@ -220,16 +248,14 @@ fn reaper_finalizes_when_last_silent_agent_times_out() {
                 }
             }
         }
-        if finalized {
+        lock_gone = !lock.exists();
+        if finalized && lock_gone {
             break;
         }
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(finalized, "reaper did not finalize after last silent agent timed out");
-    assert!(
-        !core.root.join(".coordify/runtime/core.lock").exists(),
-        "lock not removed by finalize"
-    );
+    assert!(lock_gone, "lock not removed by finalize");
     drop(stream);
 }
 
@@ -242,7 +268,7 @@ fn blank_line_is_skipped_then_register_succeeds() {
     let core = spawn_core("blnk");
     let token = read_token(&core.root);
     let sock = core.root.join(".coordify/runtime/core.sock");
-    let mut stream = UnixStream::connect(&sock).unwrap();
+    let mut stream = connect_retry(&sock);
 
     // Send a bare newline (the blank line that should be skipped).
     write_raw(&mut stream, b"\n");
@@ -265,7 +291,7 @@ fn blank_line_is_skipped_then_register_succeeds() {
 fn malformed_request_returns_error() {
     let core = spawn_core("malf");
     let sock = core.root.join(".coordify/runtime/core.sock");
-    let mut stream = UnixStream::connect(&sock).unwrap();
+    let mut stream = connect_retry(&sock);
 
     // Send something that is not valid JSON.
     stream.write_all(b"{not json\n").unwrap();
@@ -291,7 +317,7 @@ fn unregistered_connection_leaves_daemon_alive() {
 
     // Connect, send a bad-token register, then drop the stream.
     {
-        let mut stream = UnixStream::connect(&sock).unwrap();
+        let mut stream = connect_retry(&sock);
         let bad_reg = r#"{"id":"1","token":"WRONG","action":"register","meta":{}}"#;
         let resp = send_line(&mut stream, bad_reg);
         assert_eq!(resp["ok"], false);
@@ -306,7 +332,7 @@ fn unregistered_connection_leaves_daemon_alive() {
 
     // A fresh connection must still work.
     let token = read_token(&core.root);
-    let mut stream2 = UnixStream::connect(&sock).unwrap();
+    let mut stream2 = connect_retry(&sock);
     let reg = format!(
         r#"{{"id":"2","token":"{}","action":"register","meta":{{}}}}"#,
         token
