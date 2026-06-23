@@ -690,6 +690,58 @@ fn persist_knowledge(shared: &Shared, paths: &Paths) {
     }
 }
 
+/// Derive and atomically persist the session's stats, summary, heat-history,
+/// entertainment, and cross-session profiles from events.log. Best-effort:
+/// failures log STATS_PERSIST_FAILED, never block finalize.
+fn persist_stats(shared: &Shared, session: &Session, paths: &Paths) {
+    let result = (|| -> std::io::Result<()> {
+        let raw = std::fs::read_to_string(session.dir.join("events.log"))?;
+        let events: Vec<serde_json::Value> = raw
+            .lines()
+            .filter(|l| !l.trim().is_empty())
+            .filter_map(|l| serde_json::from_str(l).ok())
+            .collect();
+
+        let stats = crate::stats::summarize(&events);
+        let ent = crate::entertainment::build_entertainment(&events, &stats);
+        let snapshot = {
+            let store = shared.knowledge.lock().unwrap();
+            store.summary_json(shared.knowledge_k)
+        };
+
+        // Per-session files.
+        crate::knowledge::write_atomic(
+            &session.dir.join("stats.json"),
+            &serde_json::to_string_pretty(&stats).unwrap_or_else(|_| "{}".into()),
+        )?;
+        crate::knowledge::write_atomic(
+            &session.dir.join("session-summary.json"),
+            &serde_json::to_string_pretty(&stats.to_summary(&ent.narrative, snapshot)).unwrap_or_else(|_| "{}".into()),
+        )?;
+        crate::knowledge::write_atomic(
+            &session.dir.join("heat-history.json"),
+            &serde_json::to_string_pretty(&crate::stats::heat_history(&events)).unwrap_or_else(|_| "[]".into()),
+        )?;
+        crate::knowledge::write_atomic(
+            &session.dir.join("entertainment.json"),
+            &serde_json::to_string_pretty(&ent).unwrap_or_else(|_| "{}".into()),
+        )?;
+
+        // Cross-session profiles (merge + derived views).
+        let (mut profiles, _q) = crate::stats::ProfileStore::load(&paths.knowledge_dir());
+        profiles.merge_session(&stats.agents);
+        profiles.save_atomic(&paths.knowledge_dir())?;
+        Ok(())
+    })();
+    if let Err(e) = result {
+        let _ = shared.log.lock().unwrap().append(&serde_json::json!({
+            "type": "STATS_PERSIST_FAILED",
+            "error": e.to_string(),
+            "ts": crate::bootstrap::now_iso(),
+        }));
+    }
+}
+
 /// Proposal-timeout sweep (§18.6): escalate conflicts that aged out without
 /// both proposals. Snapshot under a short conflict lock, then log — never
 /// nested. Called each reaper tick with the reaper's captured `now`.
@@ -857,6 +909,7 @@ pub fn run(
                 && shared.finalized.compare_exchange(false, true, SeqCst, SeqCst).is_ok()
             {
                 persist_knowledge(&shared, &paths);
+                persist_stats(&shared, &session, &paths);
                 finalize(&session, &paths, seen)?;
                 break;
             } else if network_empty && seen > 0 {
@@ -940,6 +993,7 @@ pub fn spawn_reaper(
             && shared.finalized.compare_exchange(false, true, SeqCst, SeqCst).is_ok()
         {
             persist_knowledge(&shared, &paths);
+            persist_stats(&shared, &session, &paths);
             let _ = finalize(&session, &paths, seen);
             std::process::exit(0);
         }

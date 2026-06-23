@@ -814,6 +814,52 @@ fn knowledge_files_written_after_conflict_session() {
 }
 
 #[test]
+fn stats_files_written_after_session() {
+    let core = spawn_core_fast_reaper("stat");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+
+    let reg = |id: &str| format!(r#"{{"id":"{}","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, id, token);
+    let a = send_line(&mut stream, &reg("1"))["agent_id"].as_str().unwrap().to_string();
+    let b = send_line(&mut stream, &reg("2"))["agent_id"].as_str().unwrap().to_string();
+    let mk = |id: &str, agent: &str| format!(
+        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix"}},"confidence":0.9}}}}"#,
+        id, token, agent);
+    assert_eq!(send_line(&mut stream, &mk("3", &a))["ok"], true);
+    assert_eq!(send_line(&mut stream, &mk("4", &b))["ok"], true);
+
+    drop(stream); // both agents go silent -> reaper finalizes
+
+    let sdir = core.root.join(".coordify/sessions");
+    let kdir = core.root.join(".coordify/knowledge");
+    let start = std::time::Instant::now();
+    let mut summary = String::new();
+    while start.elapsed() < Duration::from_secs(4) {
+        if let Ok(entries) = std::fs::read_dir(&sdir) {
+            for e in entries.flatten() {
+                let f = e.path().join("session-summary.json");
+                if f.exists() { summary = std::fs::read_to_string(f).unwrap(); }
+            }
+        }
+        if !summary.is_empty() && kdir.join("agent-profiles.json").exists() { break; }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(!summary.is_empty(), "session-summary.json written");
+    assert!(summary.contains("\"conflicts\""), "summary has conflicts section:\n{summary}");
+    assert!(summary.contains("\"narrative\""), "summary has narrative");
+    // sibling per-session files
+    let any_session = std::fs::read_dir(&sdir).unwrap().flatten().map(|e| e.path()).find(|p| p.join("stats.json").exists()).expect("a session dir with stats.json");
+    assert!(any_session.join("stats.json").exists());
+    assert!(any_session.join("heat-history.json").exists());
+    assert!(any_session.join("entertainment.json").exists());
+    // cross-session profiles
+    assert!(kdir.join("agent-profiles.json").exists(), "agent-profiles.json written");
+    let prof = std::fs::read_to_string(kdir.join("agent-profiles.json")).unwrap();
+    assert!(prof.contains(&a) || prof.contains("claimsMade"), "profiles populated:\n{prof}");
+}
+
+#[test]
 fn file_touched_over_socket_raises_heat() {
     let core = spawn_core("ftouch");
     let token = read_token(&core.root);
