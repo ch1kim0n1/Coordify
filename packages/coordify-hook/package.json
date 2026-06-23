@@ -1,0 +1,9 @@
+{
+  "name": "coordify-hook",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Coordify Node hook adapter — per-session sidecar bridging Claude Code hooks to Coordify Core.",
+  "scripts": {
+    "test": "node --test"
+  }
+}
