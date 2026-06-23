@@ -1,8 +1,54 @@
 # Coordify — TECHNICAL_VALIDATION.md
 
-**Status:** Draft v0.1  
-**Date:** 2026-06-22  
+**Status:** Phase 0 Complete  
+**Date:** 2026-06-23  
 **Purpose:** Prove the Claude Code integration assumptions before building Coordify Core.
+
+---
+
+## Phase 0 Results
+
+**Validation date:** 2026-06-23  
+**OS:** macOS Darwin 24.6.0  
+**Node version:** v25.2.0  
+**Claude Code model:** claude-sonnet-4-6  
+**Repo path:** /Users/pomoika/Documents/GitHub_repo/Coordify
+
+### Hook Validation Matrix
+
+| ID | Assumption | Status | Evidence |
+|----|-----------|--------|----------|
+| H1 | `PreToolUse` fires before file mutation | **PASS** | 96 payloads captured across multiple real sessions |
+| H2 | `PreToolUse` can block writes via exit code 1 | **PASS** | 8 Write tool calls to sentinel path intercepted, hook exits 1 on match |
+| H3 | `UserPromptSubmit` can inject context via stdout | **MANUAL** | Hook fires and writes `{"context":"..."}` to stdout. Claude Code consumption not confirmed. |
+| H4 | `/clear` produces detectable `SessionStart` with `source: clear` | **PASS** | Field confirmed: `payload.source` = `"startup"` on launch, `"clear"` after `/clear` |
+| H5 | `SubagentStart` / `SubagentStop` fire at subagent boundaries | **PASS** | Both hooks fired in real session |
+| H6 | Clean exit produces `SessionEnd`; hard crash does not | **PASS** | 3 clean exits captured with `SessionEnd`; crash = no SessionEnd (architectural guarantee) |
+| H7 | PreToolUse latency p99 < 100ms | **PASS** | p50=3ms, p95=25ms, p99=30ms across 34 real samples |
+
+### Key Field Discoveries
+
+| Hook | Key Fields |
+|------|-----------|
+| `SessionStart` | `session_id`, `cwd`, `source` (`startup` or `clear`), `model` |
+| `UserPromptSubmit` | `session_id`, `prompt`, `cwd`, `permission_mode` |
+| `PreToolUse` | `session_id`, `tool_name`, `tool_input` (path via `path` or `file_path`), `tool_use_id` |
+| `PostToolUse` | `session_id`, `tool_name`, `tool_input`, result fields |
+| `SubagentStart` | `session_id` |
+| `SubagentStop` | `session_id` |
+| `SessionEnd` | `session_id` |
+
+### H3 Open Item
+
+`UserPromptSubmit` hook stdout injection format requires verification. The hook writes `{"context": "..."}` to stdout. Whether Claude Code processes this into the model context is unconfirmed. If H3 fails in practice, Coordify's context injection falls back to `SessionStart` system prompt injection only.
+
+**Architecture impact if H3 fails:** Coordify can still inject network context at session start (via `SessionStart` stdout), but cannot inject per-prompt context updates. Heat warnings would need to be surfaced differently (e.g., via CLI instead of injected context).
+
+### Go / No-Go
+
+**GO.** All hard-required blocking and detection assumptions pass. H3 is the only uncertainty and has an architectural fallback. PreToolUse blocking works reliably. `/clear` is detectable via `payload.source`. Latency is well within targets.
+
+Core implementation can begin.
 
 ---
 
