@@ -98,9 +98,9 @@ function buildMatrix(payloadFiles, latencyRecords) {
     {
       id: 'H3',
       desc: '`UserPromptSubmit` can inject context into Claude input',
-      status: hooksSeen.has('UserPromptSubmit') ? 'MANUAL' : 'PENDING',
+      status: hooksSeen.has('UserPromptSubmit') ? 'FAIL' : 'PENDING',
       evidence: hooksSeen.has('UserPromptSubmit')
-        ? `${countFor('UserPromptSubmit')} payload(s) — hook fires and writes {"context":"..."} to stdout; Claude Code consumption unconfirmed`
+        ? `${countFor('UserPromptSubmit')} payload(s) — hook fires; {"context":"..."} stdout key not consumed by Claude Code. Fallback: SessionStart injection confirmed PASS.`
         : 'No UserPromptSubmit payloads yet'
     },
     {

@@ -15,11 +15,6 @@ process.stdin.on('end', () => {
   try {
     const payload = JSON.parse(raw);
     logger.capture('UserPromptSubmit', payload);
-
-    // Attempt context injection — Phase 0 validates whether this appears in Claude context
-    process.stdout.write(JSON.stringify({
-      context: '[Coordify Phase 0] Hook injection active. If you see this, H3 is PASS.'
-    }));
   } catch (_) {
     // never throw
   }

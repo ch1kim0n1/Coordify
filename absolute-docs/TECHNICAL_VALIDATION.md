@@ -20,7 +20,7 @@
 |----|-----------|--------|----------|
 | H1 | `PreToolUse` fires before file mutation | **PASS** | 96 payloads captured across multiple real sessions |
 | H2 | `PreToolUse` can block writes via exit code 1 | **PASS** | 8 Write tool calls to sentinel path intercepted, hook exits 1 on match |
-| H3 | `UserPromptSubmit` can inject context via stdout | **MANUAL** | Hook fires and writes `{"context":"..."}` to stdout. Claude Code consumption not confirmed. |
+| H3 | `UserPromptSubmit` can inject context via stdout | **FAIL** | Hook fires. `{"context":"..."}` stdout key not consumed by Claude Code. Confirmed via live session test — no injected text visible to model. |
 | H4 | `/clear` produces detectable `SessionStart` with `source: clear` | **PASS** | Field confirmed: `payload.source` = `"startup"` on launch, `"clear"` after `/clear` |
 | H5 | `SubagentStart` / `SubagentStop` fire at subagent boundaries | **PASS** | Both hooks fired in real session |
 | H6 | Clean exit produces `SessionEnd`; hard crash does not | **PASS** | 3 clean exits captured with `SessionEnd`; crash = no SessionEnd (architectural guarantee) |
@@ -38,11 +38,13 @@
 | `SubagentStop` | `session_id` |
 | `SessionEnd` | `session_id` |
 
-### H3 Open Item
+### H3 Result: FAIL
 
-`UserPromptSubmit` hook stdout injection format requires verification. The hook writes `{"context": "..."}` to stdout. Whether Claude Code processes this into the model context is unconfirmed. If H3 fails in practice, Coordify's context injection falls back to `SessionStart` system prompt injection only.
+`UserPromptSubmit` stdout injection does not work. Tested live: Claude saw no injected text when the hook wrote `{"context": "..."}` to stdout. The key is not consumed by Claude Code.
 
-**Architecture impact if H3 fails:** Coordify can still inject network context at session start (via `SessionStart` stdout), but cannot inject per-prompt context updates. Heat warnings would need to be surfaced differently (e.g., via CLI instead of injected context).
+**Confirmed fallback:** `SessionStart` stdout injection works. Live session confirmed Claude receives user email, date, and cwd from SessionStart hook output. Coordify will inject network state at session start only.
+
+**Architecture impact:** Per-prompt context updates not possible via hooks. Heat warnings surface via CLI output or SessionStart injection on new sessions.
 
 ### Go / No-Go
 
