@@ -1,6 +1,7 @@
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::collections::{BTreeMap, BTreeSet};
+use std::path::Path;
 
 fn ev_type(e: &Value) -> &str {
     e.get("type").and_then(|v| v.as_str()).unwrap_or("")
@@ -217,6 +218,97 @@ pub fn summarize(events: &[Value]) -> SessionStats {
     s
 }
 
+#[derive(Debug, Default, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AgentProfile {
+    pub sessions: u64,
+    pub claims_made: u64,
+    pub tasks_completed: u64,
+    pub ghost_claims: u64,
+    pub conflicts_involved: u64,
+    pub heat_generated_sum: u64,
+    pub heat_generated_count: u64,
+    pub arbitrations_involved: u64,
+    pub deadlocks_involved: u64,
+}
+
+#[derive(Default)]
+pub struct ProfileStore {
+    pub agents: BTreeMap<String, AgentProfile>,
+}
+
+impl ProfileStore {
+    pub fn load(dir: &Path) -> (Self, Vec<String>) {
+        let mut store = Self::default();
+        let mut quarantined = Vec::new();
+        let f = dir.join("agent-profiles.json");
+        if f.exists() {
+            match std::fs::read_to_string(&f)
+                .ok()
+                .and_then(|s| serde_json::from_str::<BTreeMap<String, AgentProfile>>(&s).ok())
+            {
+                Some(m) => store.agents = m,
+                None => crate::knowledge::quarantine(&f, &mut quarantined),
+            }
+        }
+        (store, quarantined)
+    }
+
+    pub fn merge_session(&mut self, tallies: &BTreeMap<String, AgentTally>) {
+        for (id, t) in tallies {
+            let p = self.agents.entry(id.clone()).or_default();
+            p.sessions += 1;
+            p.claims_made += t.claims_made;
+            p.tasks_completed += t.tasks_completed;
+            p.ghost_claims += t.ghost_claims;
+            p.conflicts_involved += t.conflicts_involved;
+            p.heat_generated_sum += t.heat_generated_sum;
+            p.heat_generated_count += t.heat_generated_count;
+            p.arbitrations_involved += t.arbitrations_involved;
+            p.deadlocks_involved += t.deadlocks_involved;
+        }
+    }
+
+    pub fn save_atomic(&self, dir: &Path) -> std::io::Result<()> {
+        std::fs::create_dir_all(dir)?;
+        let profiles = serde_json::to_string_pretty(&self.agents).unwrap_or_else(|_| "{}".into());
+        crate::knowledge::write_atomic(&dir.join("agent-profiles.json"), &profiles)?;
+
+        let velocity: BTreeMap<&String, Value> = self
+            .agents
+            .iter()
+            .map(|(id, p)| {
+                (id, serde_json::json!({
+                    "tasksPerSession": if p.sessions > 0 { p.tasks_completed as f64 / p.sessions as f64 } else { 0.0 },
+                    "meanHeatGenerated": if p.heat_generated_count > 0 { p.heat_generated_sum as f64 / p.heat_generated_count as f64 } else { 0.0 },
+                }))
+            })
+            .collect();
+        crate::knowledge::write_atomic(
+            &dir.join("velocity-profiles.json"),
+            &serde_json::to_string_pretty(&velocity).unwrap_or_else(|_| "{}".into()),
+        )?;
+
+        let overhead: BTreeMap<&String, Value> = self
+            .agents
+            .iter()
+            .map(|(id, p)| {
+                (id, serde_json::json!({
+                    "conflictsInvolved": p.conflicts_involved,
+                    "arbitrationsInvolved": p.arbitrations_involved,
+                    "deadlocksInvolved": p.deadlocks_involved,
+                    "overheadScore": p.conflicts_involved + p.arbitrations_involved + p.deadlocks_involved,
+                }))
+            })
+            .collect();
+        crate::knowledge::write_atomic(
+            &dir.join("coordination-overhead.json"),
+            &serde_json::to_string_pretty(&overhead).unwrap_or_else(|_| "{}".into()),
+        )?;
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -307,4 +399,49 @@ mod tests {
     // in case the brief's tests use it directly).
     #[allow(dead_code)]
     fn _use_ev() { let _ = ev(serde_json::Value::Null); }
+
+    #[test]
+    fn profile_merge_accumulates_across_sessions() {
+        let dir = std::env::temp_dir().join(format!("cp-{}-{}", std::process::id(), 1));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut tallies: BTreeMap<String, AgentTally> = BTreeMap::new();
+        tallies.insert("agent-1".into(), AgentTally { claims_made: 2, tasks_completed: 2, heat_generated_sum: 100, heat_generated_count: 4, conflicts_involved: 1, ..Default::default() });
+
+        let (mut store, q) = ProfileStore::load(&dir);
+        assert!(q.is_empty());
+        store.merge_session(&tallies);
+        store.save_atomic(&dir).unwrap();
+
+        // second session
+        let (mut store2, _) = ProfileStore::load(&dir);
+        store2.merge_session(&tallies);
+        store2.save_atomic(&dir).unwrap();
+
+        let (final_store, _) = ProfileStore::load(&dir);
+        let p = final_store.agents.get("agent-1").unwrap();
+        assert_eq!(p.sessions, 2);
+        assert_eq!(p.claims_made, 4);
+        assert_eq!(p.tasks_completed, 4);
+
+        // derived velocity + overhead written
+        let vel = std::fs::read_to_string(dir.join("velocity-profiles.json")).unwrap();
+        assert!(vel.contains("tasksPerSession"));
+        let ovh: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("coordination-overhead.json")).unwrap()).unwrap();
+        assert_eq!(ovh["agent-1"]["overheadScore"], 2); // conflicts 1+1, arb 0, deadlock 0
+        // prev rotation of agent-profiles
+        assert!(dir.join("agent-profiles.json.prev").exists());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn profile_corrupt_is_quarantined() {
+        let dir = std::env::temp_dir().join(format!("cp-{}-{}", std::process::id(), 2));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("agent-profiles.json"), b"{bad").unwrap();
+        let (store, q) = ProfileStore::load(&dir);
+        assert_eq!(q.len(), 1);
+        assert!(store.agents.is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
