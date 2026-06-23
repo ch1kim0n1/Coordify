@@ -39,6 +39,10 @@ fn ensure_runtime_dir(paths: &Paths) -> std::io::Result<()> {
 
 pub fn acquire_lock(paths: &Paths, version: &str) -> std::io::Result<LockOutcome> {
     ensure_runtime_dir(paths)?;
+    acquire_lock_inner(paths, version, true)
+}
+
+fn acquire_lock_inner(paths: &Paths, version: &str, retry: bool) -> std::io::Result<LockOutcome> {
     let info = LockInfo {
         pid: std::process::id(),
         started_at: now_iso(),
@@ -56,9 +60,15 @@ pub fn acquire_lock(paths: &Paths, version: &str) -> std::io::Result<LockOutcome
             match serde_json::from_str::<LockInfo>(&raw) {
                 Ok(existing) if pid_alive(existing.pid) => Ok(LockOutcome::HeldBy(existing)),
                 _ => {
-                    // Stale or unparseable lock: remove and retry once.
-                    fs::remove_file(paths.lock())?;
-                    acquire_lock(paths, version)
+                    if retry {
+                        // Stale or unparseable lock: remove and retry exactly once.
+                        fs::remove_file(paths.lock())?;
+                        acquire_lock_inner(paths, version, false)
+                    } else {
+                        Err(std::io::Error::other(
+                            "lock held by unknown process after one retry",
+                        ))
+                    }
                 }
             }
         }
@@ -144,6 +154,25 @@ mod tests {
         match acquire_lock(&paths, VERSION).unwrap() {
             LockOutcome::Acquired => {}
             other => panic!("expected Acquired after breaking stale lock, got {:?}", other),
+        }
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    /// Verifies that an unparseable lock file is treated as stale and broken on the
+    /// first retry, returning `Acquired`. This is also the regression guard that the
+    /// retry bound does not loop: the inner function is only allowed one retry, so
+    /// if the file were re-created after removal the call would return an error rather
+    /// than recurse again.
+    #[test]
+    fn stale_lock_retry_is_bounded() {
+        let root = temp_root("lock-unparseable");
+        let paths = Paths::new(&root);
+        ensure_runtime_dir(&paths).unwrap();
+        // Write an unparseable lock file.
+        fs::write(paths.lock(), b"not json").unwrap();
+        match acquire_lock(&paths, VERSION).unwrap() {
+            LockOutcome::Acquired => {}
+            other => panic!("expected Acquired after breaking unparseable lock, got {:?}", other),
         }
         let _ = fs::remove_dir_all(&root);
     }
