@@ -6,6 +6,10 @@ const startedAt = Date.now();
 let raw = '';
 
 process.stdin.setEncoding('utf8');
+process.stdin.on('error', () => {
+  logger.finish('SessionEnd', startedAt);
+  process.exit(0);
+});
 process.stdin.on('data', chunk => { raw += chunk; });
 process.stdin.on('end', () => {
   try {

@@ -8,6 +8,12 @@ const BACKUP_PATH = SETTINGS_PATH + '.backup';
 const HOOKS_DIR = 'phase-0/hooks';
 
 function run() {
+  // Guard: must be run from project root
+  if (!fs.existsSync(path.join(process.cwd(), 'phase-0'))) {
+    console.error('Error: run install.js from the project root (the directory containing phase-0/)');
+    process.exit(1);
+  }
+
   // Backup existing settings
   if (fs.existsSync(SETTINGS_PATH)) {
     fs.copyFileSync(SETTINGS_PATH, BACKUP_PATH);

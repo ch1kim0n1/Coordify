@@ -1,12 +1,12 @@
 # Coordify Phase 0 — Hook Validation Matrix
 
-Generated: 2026-06-23T00:07:08.359Z
+Generated: 2026-06-23T00:14:35.960Z
 
 ## Results
 
 | ID | Assumption | Status | Evidence |
 |----|-----------|--------|----------|
-| H1 | `PreToolUse` fires before file mutation | **PASS** | 9 payload(s) in results/payloads/ |
+| H1 | `PreToolUse` fires before file mutation | **PASS** | 17 payload(s) in results/payloads/ |
 | H2 | `PreToolUse` can block writes via exit code 1 | **MANUAL** | Hook fired — verify by asking Claude to write to phase-0/sentinel/BLOCK_TARGET |
 | H3 | `UserPromptSubmit` can inject context into Claude input | **MANUAL** | 5 payload(s) — verify injection string visible in Claude context |
 | H4 | `/clear` produces detectable SessionStart event | **MANUAL** | 4 SessionStart payload(s) — inspect for /clear indicator field |
@@ -26,6 +26,6 @@ Generated: 2026-06-23T00:07:08.359Z
 
 ## Coverage
 
-- Total payload files: 28
+- Total payload files: 41
 - Hooks seen: BadHook, PostToolUse, PreToolUse, SessionEnd, SessionStart, SubagentStart, SubagentStop, TestHook, UserPromptSubmit
 - Latency samples: 5
