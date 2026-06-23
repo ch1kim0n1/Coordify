@@ -181,25 +181,23 @@ fn last_agent_leaving_finalizes_session() {
 }
 
 #[test]
-fn reaper_logs_agent_lost_for_silent_agent() {
+fn reaper_logs_agent_lost_and_orphans_claim() {
     let core = spawn_core_fast_reaper("reap");
     let token = read_token(&core.root);
     let sock = core.root.join(".coordify/runtime/core.sock");
 
-    // Register, then keep the connection OPEN but send no heartbeats so the
-    // reaper times the agent out while it is still "connected".
     let mut stream = connect_retry(&sock);
-    let reg = format!(
-        r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
-        token
+    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
+    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+    let propose = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","confidence":0.9}}}}"#,
+        token, agent
     );
-    let resp = send_line(&mut stream, &reg);
-    assert_eq!(resp["ok"], true);
+    assert_eq!(send_line(&mut stream, &propose)["ok"], true);
 
-    // Wait past the 300ms timeout + a reaper tick.
+    // Keep the connection open, send no heartbeats; reaper times the agent out.
     std::thread::sleep(Duration::from_millis(700));
 
-    // Find the events.log and assert AGENT_LOST + CLAIM_ORPHANED are present.
     let sessions = core.root.join(".coordify/sessions");
     let mut log_contents = String::new();
     if let Ok(entries) = std::fs::read_dir(&sessions) {
@@ -210,10 +208,8 @@ fn reaper_logs_agent_lost_for_silent_agent() {
             }
         }
     }
-    assert!(log_contents.contains("AGENT_LOST"), "no AGENT_LOST event logged");
-    assert!(log_contents.contains("CLAIM_ORPHANED"), "no CLAIM_ORPHANED event logged");
-
-    // Keep the stream alive until assertions are done.
+    assert!(log_contents.contains("AGENT_LOST"), "no AGENT_LOST logged");
+    assert!(log_contents.contains("CLAIM_ORPHANED"), "no CLAIM_ORPHANED logged");
     drop(stream);
 }
 
@@ -391,6 +387,81 @@ fn root_flag_without_value_exits_one() {
         stderr.contains("requires a path"),
         "expected 'requires a path' in stderr, got: {stderr}"
     );
+}
+
+#[test]
+fn claim_proposed_and_released_over_socket() {
+    let core = spawn_core("claim");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+
+    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
+    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+
+    let propose = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","confidence":0.9}}}}"#,
+        token, agent
+    );
+    let resp = send_line(&mut stream, &propose);
+    assert_eq!(resp["ok"], true);
+    let claim_id = resp["data"]["claimId"].as_str().unwrap().to_string();
+    assert_eq!(resp["data"]["status"], "ACTIVE");
+
+    let release = format!(
+        r#"{{"id":"3","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_RELEASED","claimId":"{}","agentId":"{}","reason":"TASK_COMPLETED"}}}}"#,
+        token, claim_id, agent
+    );
+    assert_eq!(send_line(&mut stream, &release)["ok"], true);
+}
+
+#[test]
+fn agent_state_change_over_socket() {
+    let core = spawn_core("state");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
+    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+
+    let good = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"AGENT_STATE_CHANGED","agentId":"{}","state":"ACTIVE"}}}}"#,
+        token, agent
+    );
+    assert_eq!(send_line(&mut stream, &good)["ok"], true);
+
+    // Active -> WAITING_USER is not a legal direct transition.
+    let bad = format!(
+        r#"{{"id":"3","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"AGENT_STATE_CHANGED","agentId":"{}","state":"WAITING_USER"}}}}"#,
+        token, agent
+    );
+    let resp = send_line(&mut stream, &bad);
+    assert_eq!(resp["ok"], false);
+    assert_eq!(resp["error"], "INVALID_STATE_TRANSITION");
+}
+
+#[test]
+fn clear_invoked_over_socket_releases_and_bumps_generation() {
+    let core = spawn_core("clear");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
+    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+
+    let propose = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","confidence":0.9}}}}"#,
+        token, agent
+    );
+    assert_eq!(send_line(&mut stream, &propose)["data"]["status"], "ACTIVE");
+
+    let clear = format!(
+        r#"{{"id":"3","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLEAR_INVOKED","agentId":"{}"}}}}"#,
+        token, agent
+    );
+    let resp = send_line(&mut stream, &clear);
+    assert_eq!(resp["ok"], true);
+    assert_eq!(resp["data"]["generation"], 2);
 }
 
 // ---------------------------------------------------------------------------
