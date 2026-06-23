@@ -64,7 +64,9 @@ mod tests {
         let root = temp_root("finalize");
         let paths = Paths::new(&root);
         fs::create_dir_all(paths.runtime()).unwrap();
-        // Seed runtime files.
+        // Seed all five runtime files.
+        fs::write(paths.socket(), "x").unwrap();
+        fs::write(paths.live_state(), "{}").unwrap();
         fs::write(paths.lock(), "{}").unwrap();
         fs::write(paths.token(), "tok").unwrap();
         fs::write(paths.pid(), "123").unwrap();
@@ -76,6 +78,8 @@ mod tests {
         let doc: serde_json::Value = serde_json::from_str(&summary).unwrap();
         assert_eq!(doc["agentsSeen"], 3);
         assert_eq!(doc["sessionId"], s.id);
+        assert!(!paths.socket().exists());
+        assert!(!paths.live_state().exists());
         assert!(!paths.lock().exists());
         assert!(!paths.token().exists());
         assert!(!paths.pid().exists());

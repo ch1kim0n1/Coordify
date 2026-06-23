@@ -14,6 +14,7 @@ pub struct State {
 }
 
 impl State {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         Self { agents: HashMap::new(), next_id: 1 }
     }
@@ -89,9 +90,20 @@ mod tests {
         let b = s.register(json!({}), 9000);
         // now=10000, timeout=5000 -> a (idle 9000) is lost, b (idle 1000) survives.
         let lost = s.reap(10_000, 5_000);
-        assert_eq!(lost, vec![a]);
+        assert!(lost.contains(&a), "agent idle > timeout_ms must be reaped");
+        assert_eq!(lost.len(), 1);
         assert_eq!(s.agent_count(), 1);
         assert!(s.heartbeat(&b, 11_000));
+    }
+
+    #[test]
+    fn reap_boundary_is_strictly_greater() {
+        let mut s = State::new();
+        // Register agent at now=5000 so idle == timeout (10000-5000 == 5000); must survive.
+        let c = s.register(json!({}), 5_000);
+        let lost = s.reap(10_000, 5_000);
+        assert!(!lost.contains(&c), "agent idle exactly timeout_ms must survive (strict >)");
+        assert!(s.heartbeat(&c, 11_000), "surviving agent must still be present");
     }
 
     #[test]
