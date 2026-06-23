@@ -87,8 +87,16 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                 if st.agent_state(&agent_id).is_none() {
                     None
                 } else {
+                    let task_summary = req
+                        .event
+                        .get("task")
+                        .and_then(|t| t.get("summary"))
+                        .and_then(|s| s.as_str())
+                        .unwrap_or("")
+                        .to_string();
                     let created = st.claims.propose(
                         &agent_id,
+                        task_summary,
                         intent.as_str().to_string(),
                         domains,
                         estimated_files,

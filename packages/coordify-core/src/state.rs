@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 use crate::cap::AgentState;
 use crate::claim::ClaimStore;
+use crate::heat::HeatInputs;
 
 #[derive(Debug, Clone)]
 pub struct Agent {
@@ -10,6 +11,7 @@ pub struct Agent {
     pub meta: serde_json::Value,
     pub state: AgentState,
     pub generation: u64,
+    pub branch: Option<String>,
 }
 
 pub struct State {
@@ -27,6 +29,7 @@ impl State {
     pub fn register(&mut self, meta: serde_json::Value, now_ms: u64) -> String {
         let id = format!("agent-{}", self.next_id);
         self.next_id += 1;
+        let branch = meta.get("branch").and_then(|v| v.as_str()).map(String::from);
         self.agents.insert(
             id.clone(),
             Agent {
@@ -35,6 +38,7 @@ impl State {
                 meta,
                 state: AgentState::Discovery,
                 generation: 1,
+                branch,
             },
         );
         id
@@ -101,6 +105,20 @@ impl State {
                 agent.state = AgentState::Active;
             }
         }
+    }
+
+    pub fn heat_inputs_for(&self, agent_id: &str) -> Option<HeatInputs> {
+        let agent = self.agents.get(agent_id)?;
+        let claim = self.claims.live_claim_for(agent_id)?;
+        Some(HeatInputs {
+            agent_id: agent_id.to_string(),
+            intent: claim.intent.clone(),
+            domains: claim.domains.iter().cloned().collect(),
+            files: claim.estimated_files.iter().cloned().collect(),
+            task_tokens: crate::heat::tokens(&claim.task_summary),
+            last_seen_ms: agent.last_seen_ms,
+            branch: agent.branch.clone(),
+        })
     }
 }
 
@@ -247,5 +265,22 @@ mod tests {
         // From Active, promote is a no-op (stays Active).
         s.promote_active(&id);
         assert_eq!(s.agent_state(&id), Some(Active));
+    }
+
+    #[test]
+    fn register_reads_branch_from_meta() {
+        let mut s = State::new();
+        let id = s.register(serde_json::json!({"branch": "main"}), 1000);
+        let inp = {
+            // no live claim yet -> heat_inputs_for is None
+            assert!(s.heat_inputs_for(&id).is_none());
+            // give the agent a live claim, then inputs appear with the branch.
+            s.claims.propose(&id, "fix bug".into(), "BUGFIX".into(), vec!["AUTH".into()], vec!["a.rs".into()], 0.9);
+            s.heat_inputs_for(&id).unwrap()
+        };
+        assert_eq!(inp.branch.as_deref(), Some("main"));
+        assert_eq!(inp.intent, "BUGFIX");
+        assert!(inp.task_tokens.contains("fix"));
+        assert!(inp.files.contains("a.rs"));
     }
 }
