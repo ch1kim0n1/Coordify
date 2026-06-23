@@ -537,6 +537,58 @@ fn overlapping_claims_emit_heat_updated() {
     );
 }
 
+#[test]
+fn predicted_heat_calculated_logged_on_second_overlapping_claim() {
+    let core = spawn_core("pheat");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+
+    // Both agents must share one connection so both remain live simultaneously
+    // (the server finalizes when the last connected agent leaves; two separate
+    // connections would cause the server to exit after A disconnects).
+    let mut stream = connect_retry(&sock);
+
+    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let agent_a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
+
+    let claim_a = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+        token, agent_a
+    );
+    assert_eq!(send_line(&mut stream, &claim_a)["ok"], true);
+
+    let reg_b = format!(r#"{{"id":"3","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let agent_b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
+    let claim_b = format!(
+        r#"{{"id":"4","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+        token, agent_b
+    );
+    let resp = send_line(&mut stream, &claim_b);
+    assert_eq!(resp["ok"], true);
+    assert_eq!(resp["data"]["recommendation"], "NEGOTIATE_BEFORE_CLAIM");
+
+    drop(stream);
+
+    let sessions = core.root.join(".coordify/sessions");
+    let mut log_contents = String::new();
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_secs(3) {
+        if let Ok(entries) = std::fs::read_dir(&sessions) {
+            for e in entries.flatten() {
+                let log = e.path().join("events.log");
+                if log.exists() {
+                    log_contents = std::fs::read_to_string(log).unwrap();
+                }
+            }
+        }
+        if log_contents.contains("PREDICTED_HEAT_CALCULATED") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(log_contents.contains("PREDICTED_HEAT_CALCULATED"), "no PREDICTED_HEAT_CALCULATED logged");
+}
+
 // ---------------------------------------------------------------------------
 // Target E11: a file at <root>/.coordify/runtime prevents create_dir_all from
 // succeeding → acquire_lock errors → process exits 1.

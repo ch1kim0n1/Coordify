@@ -85,6 +85,52 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
             confidence,
             ..
         } => {
+            // Hoist task_summary so both predicted_heat and propose can use it.
+            let task_summary = req
+                .event
+                .get("task")
+                .and_then(|t| t.get("summary"))
+                .and_then(|s| s.as_str())
+                .unwrap_or("")
+                .to_string();
+
+            // Build inputs for the PROPOSED claim to forecast heat before accepting.
+            let proposed_inputs = {
+                let st = shared.state.lock().unwrap();
+                st.agents_get_branch_and_seen(&agent_id).map(|(branch, last_seen)| heat::HeatInputs {
+                    agent_id: agent_id.clone(),
+                    intent: intent.as_str().to_string(),
+                    domains: domains.iter().cloned().collect(),
+                    files: estimated_files.iter().cloned().collect(),
+                    task_tokens: heat::tokens(&task_summary),
+                    last_seen_ms: last_seen,
+                    branch,
+                })
+            };
+            let mut recommendation = "PROCEED".to_string();
+            if let Some(ref pinputs) = proposed_inputs {
+                let edges = predicted_heat(shared, pinputs);
+                if let Some(worst) = edges.iter().max_by_key(|e| e.heat) {
+                    recommendation = worst.band.recommendation().to_string();
+                }
+                let edges_json: Vec<serde_json::Value> = edges
+                    .iter()
+                    .map(|e| serde_json::json!({
+                        "pair": [e.pair.0, e.pair.1],
+                        "heat": e.heat,
+                        "band": e.band.as_str(),
+                        "reasons": e.reasons,
+                    }))
+                    .collect();
+                let _ = shared.log.lock().unwrap().append(&serde_json::json!({
+                    "type": "PREDICTED_HEAT_CALCULATED",
+                    "agentId": agent_id,
+                    "edges": edges_json,
+                    "recommendation": recommendation,
+                    "ts": crate::bootstrap::now_iso(),
+                }));
+            }
+
             // Existence check + propose + promote under ONE state lock (atomic;
             // closes the TOCTOU window vs. the reaper). None => agent unknown.
             let outcome = {
@@ -92,13 +138,6 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                 if st.agent_state(&agent_id).is_none() {
                     None
                 } else {
-                    let task_summary = req
-                        .event
-                        .get("task")
-                        .and_then(|t| t.get("summary"))
-                        .and_then(|s| s.as_str())
-                        .unwrap_or("")
-                        .to_string();
                     let created = st.claims.propose(
                         &agent_id,
                         task_summary,
@@ -129,7 +168,11 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                     recompute_current_heat(shared, &agent_id);
                     Response::ok_with_data(
                         &req.id,
-                        serde_json::json!({"claimId": claim.claim_id, "status": claim.status.as_str()}),
+                        serde_json::json!({
+                            "claimId": claim.claim_id,
+                            "status": claim.status.as_str(),
+                            "recommendation": recommendation,
+                        }),
                     )
                 }
                 Some(None) => {
@@ -231,6 +274,36 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
             Response::ok_with_data(&req.id, serde_json::json!({"generation": generation}))
         }
     }
+}
+
+struct PredictedEdge {
+    pair: (String, String),
+    heat: u32,
+    band: HeatBand,
+    reasons: Vec<String>,
+}
+
+/// Predicted heat of a proposed claim's inputs vs existing live-claim agents.
+fn predicted_heat(shared: &Shared, proposed: &heat::HeatInputs) -> Vec<PredictedEdge> {
+    let others = {
+        let st = shared.state.lock().unwrap();
+        st.live_claim_inputs_all()
+            .into_iter()
+            .filter(|inp| inp.agent_id != proposed.agent_id)
+            .collect::<Vec<_>>()
+    };
+    others
+        .iter()
+        .map(|other| {
+            let r = heat::compute_heat(proposed, other, &shared.knowledge, &shared.heat_cfg);
+            PredictedEdge {
+                pair: (proposed.agent_id.clone(), other.agent_id.clone()),
+                heat: r.heat,
+                band: r.band,
+                reasons: r.reasons,
+            }
+        })
+        .collect()
 }
 
 fn escalation(band: HeatBand) -> Option<(u32, &'static str)> {
@@ -720,6 +793,19 @@ mod tests {
         let store = s.heat.lock().unwrap();
         let edge = store.get(&a, &b).expect("edge missing");
         assert!(edge.heat >= 70, "expected high heat, got {}", edge.heat);
+    }
+
+    #[test]
+    fn proposing_against_existing_claim_returns_recommendation() {
+        let s = shared_for_test("good");
+        let a = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let b = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let mk = |agent: &str| json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{"summary":"fix session expiry"},"confidence":0.9});
+        assert!(handle_request(&s, &cap_req("good", mk(&a))).ok);
+        // B proposes overlapping work -> high predicted heat -> negotiate recommendation.
+        let resp = handle_request(&s, &cap_req("good", mk(&b)));
+        assert!(resp.ok);
+        assert_eq!(resp.data.unwrap()["recommendation"], "NEGOTIATE_BEFORE_CLAIM");
     }
 
     #[test]
