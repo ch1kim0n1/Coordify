@@ -122,7 +122,12 @@ impl State {
             agent_id: agent_id.to_string(),
             intent: claim.intent.clone(),
             domains: claim.domains.iter().cloned().collect(),
-            files: claim.estimated_files.iter().cloned().collect(),
+            files: claim
+                .estimated_files
+                .iter()
+                .cloned()
+                .chain(claim.actual_files.iter().cloned())
+                .collect(),
             task_tokens: crate::heat::tokens(&claim.task_summary),
             last_seen_ms: agent.last_seen_ms,
             branch: agent.branch.clone(),
@@ -297,5 +302,17 @@ mod tests {
         use crate::cap::AgentState::*;
         assert!(super::can_transition(Active, Active));
         assert!(super::can_transition(Discovery, Discovery));
+    }
+
+    #[test]
+    fn heat_inputs_union_estimated_and_actual_files() {
+        let mut st = State::new();
+        let id = st.register(serde_json::json!({}), 1000);
+        st.claims.propose(&id, "t".into(), "BUGFIX".into(), vec![], vec!["est.rs".into()], 0.9);
+        st.promote_active(&id);
+        st.claims.record_touched(&id, &["act.rs".into()]);
+        let inputs = st.heat_inputs_for(&id).unwrap();
+        assert!(inputs.files.contains("est.rs"));
+        assert!(inputs.files.contains("act.rs"));
     }
 }

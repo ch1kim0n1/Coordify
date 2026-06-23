@@ -340,6 +340,7 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                 }
             }
         }
+        CapEvent::FileTouched { .. } => Response::ok_for(&req.id),
     }
 }
 

@@ -50,6 +50,21 @@ impl KnowledgeStore {
         self.accrue_pairs(files);
     }
 
+    /// Accrue +1 coupling for every unordered pair of `all_files` that has at
+    /// least one endpoint in `new_files`. Pairs of pre-existing files (neither
+    /// endpoint new) are NOT re-accrued — avoids inflation on repeated touches.
+    pub fn record_cotouch(&mut self, all_files: &[String], new_files: &[String]) {
+        let new: std::collections::BTreeSet<&String> = new_files.iter().collect();
+        for i in 0..all_files.len() {
+            for j in (i + 1)..all_files.len() {
+                if new.contains(&all_files[i]) || new.contains(&all_files[j]) {
+                    let k = pair(&all_files[i], &all_files[j]);
+                    *self.coupling_counts.entry(k).or_insert(0) += 1;
+                }
+            }
+        }
+    }
+
     fn accrue_pairs(&mut self, files: &[String]) {
         for i in 0..files.len() {
             for j in (i + 1)..files.len() {
@@ -276,5 +291,19 @@ mod tests {
         assert!(!dir.join("hotzones.json").exists());
         assert!(dir.join("quarantine").exists());
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn record_cotouch_accrues_only_pairs_touching_new() {
+        let mut s = KnowledgeStore::new();
+        // existing actual set {a,b}, newly touched {c}: accrue (a,c) and (b,c), NOT (a,b)
+        s.record_cotouch(&["a".into(), "b".into(), "c".into()], &["c".into()]);
+        assert_eq!(s.coupling_count("a", "c"), 1);
+        assert_eq!(s.coupling_count("b", "c"), 1);
+        assert_eq!(s.coupling_count("a", "b"), 0);
+        // touching two new files together: (a,b) among the new pair accrues too
+        let mut s2 = KnowledgeStore::new();
+        s2.record_cotouch(&["a".into(), "b".into()], &["a".into(), "b".into()]);
+        assert_eq!(s2.coupling_count("a", "b"), 1);
     }
 }

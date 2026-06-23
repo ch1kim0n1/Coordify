@@ -214,6 +214,12 @@ pub enum CapEvent {
         conflict_id: String,
         choice: String,
     },
+    #[serde(rename_all = "camelCase")]
+    FileTouched {
+        agent_id: String,
+        #[serde(default)]
+        files: Vec<String>,
+    },
 }
 
 /// Deserialize-is-validation: any shape/value error → SCHEMA_VALIDATION_FAILED.
