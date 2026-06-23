@@ -280,6 +280,27 @@ mod tests {
     }
 
     #[test]
+    fn decodes_file_touched_camel_and_default_files() {
+        let ev = json!({"type":"FILE_TOUCHED","agentId":"agent-1","files":["src/a.rs","src/b.rs"]});
+        match decode_event(&ev).unwrap() {
+            CapEvent::FileTouched { agent_id, files } => {
+                assert_eq!(agent_id, "agent-1");
+                assert_eq!(files, vec!["src/a.rs".to_string(), "src/b.rs".to_string()]);
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+        // files omitted -> defaults to []
+        let ev2 = json!({"type":"FILE_TOUCHED","agentId":"agent-2"});
+        match decode_event(&ev2).unwrap() {
+            CapEvent::FileTouched { agent_id, files } => {
+                assert_eq!(agent_id, "agent-2");
+                assert!(files.is_empty());
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+    }
+
+    #[test]
     fn rejects_bad_intent_and_unknown_type_and_missing_field() {
         let bad_intent = json!({"type":"CLAIM_PROPOSED","agentId":"a","intent":"NOPE","confidence":0.9});
         assert_eq!(decode_event(&bad_intent).unwrap_err(), CapErrorCode::SchemaValidationFailed);
