@@ -3,7 +3,7 @@ use crate::eventlog::EventLog;
 use crate::ipc::{decode_request, encode_response, Request, Response};
 use crate::paths::Paths;
 use crate::session::{finalize, Session};
-use crate::state::{now_ms, State};
+use crate::state::{now_ms, State, StateError};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
@@ -151,8 +151,69 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
             let _ = shared.log.lock().unwrap().append(&log_event);
             Response::ok_for(&req.id)
         }
-        // Task 5 replaces this catch-all with AgentStateChanged + ClearInvoked.
-        _ => cap_err(&req.id, CapErrorCode::SchemaValidationFailed),
+        CapEvent::AgentStateChanged { agent_id, state } => {
+            let result = {
+                let mut st = shared.state.lock().unwrap();
+                st.set_state(&agent_id, state)
+            };
+            match result {
+                Ok(()) => {
+                    let event = serde_json::json!({
+                        "type": "AGENT_STATE_CHANGED",
+                        "agentId": agent_id,
+                        "state": serde_json::to_value(state).unwrap(),
+                        "ts": crate::bootstrap::now_iso(),
+                    });
+                    let _ = shared.log.lock().unwrap().append(&event);
+                    Response::ok_for(&req.id)
+                }
+                Err(StateError::AgentNotFound) => cap_err(&req.id, CapErrorCode::AgentNotFound),
+                Err(StateError::InvalidTransition) => {
+                    cap_err(&req.id, CapErrorCode::InvalidStateTransition)
+                }
+            }
+        }
+        CapEvent::ClearInvoked { agent_id } => {
+            let cleared = {
+                let mut st = shared.state.lock().unwrap();
+                if st.agent_state(&agent_id).is_none() {
+                    None
+                } else {
+                    let released = st.claims.release_for_agent(&agent_id);
+                    let generation = st.clear(&agent_id).unwrap();
+                    Some((released, generation))
+                }
+            };
+            let (released, generation) = match cleared {
+                Some(v) => v,
+                None => return cap_err(&req.id, CapErrorCode::AgentNotFound),
+            };
+            {
+                let mut log = shared.log.lock().unwrap();
+                for claim_id in &released {
+                    let _ = log.append(&serde_json::json!({
+                        "type": "CLAIM_RELEASED",
+                        "claimId": claim_id,
+                        "agentId": agent_id,
+                        "reason": "CLEAR_INVOKED",
+                        "ts": crate::bootstrap::now_iso(),
+                    }));
+                }
+                let _ = log.append(&serde_json::json!({
+                    "type": "CLEAR_INVOKED",
+                    "agentId": agent_id,
+                    "newGeneration": generation,
+                    "ts": crate::bootstrap::now_iso(),
+                }));
+                let _ = log.append(&serde_json::json!({
+                    "type": "AGENT_GENERATION_INCREMENTED",
+                    "agentId": agent_id,
+                    "generation": generation,
+                    "ts": crate::bootstrap::now_iso(),
+                }));
+            }
+            Response::ok_with_data(&req.id, serde_json::json!({"generation": generation}))
+        }
     }
 }
 
@@ -468,6 +529,44 @@ mod tests {
             &cap_req("good", json!({"type":"CLAIM_PROPOSED","agentId":"agent-404","intent":"BUGFIX","confidence":0.9})),
         );
         assert!(!resp.ok);
+        assert_eq!(resp.error.as_deref(), Some("AGENT_NOT_FOUND"));
+    }
+
+    #[test]
+    fn agent_state_changed_valid_and_invalid() {
+        let s = shared_for_test("good");
+        let agent = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        // Discovery -> Active ok
+        let ok = handle_request(&s, &cap_req("good", json!({"type":"AGENT_STATE_CHANGED","agentId":agent,"state":"ACTIVE"})));
+        assert!(ok.ok);
+        // Active -> SUBAGENT_WAITING ok; then SUBAGENT_WAITING -> TESTING is invalid
+        assert!(handle_request(&s, &cap_req("good", json!({"type":"AGENT_STATE_CHANGED","agentId":agent,"state":"SUBAGENT_WAITING"}))).ok);
+        let bad = handle_request(&s, &cap_req("good", json!({"type":"AGENT_STATE_CHANGED","agentId":agent,"state":"TESTING"})));
+        assert_eq!(bad.error.as_deref(), Some("INVALID_STATE_TRANSITION"));
+        // unknown agent
+        let nf = handle_request(&s, &cap_req("good", json!({"type":"AGENT_STATE_CHANGED","agentId":"agent-404","state":"IDLE"})));
+        assert_eq!(nf.error.as_deref(), Some("AGENT_NOT_FOUND"));
+    }
+
+    #[test]
+    fn clear_invoked_releases_claims_and_bumps_generation() {
+        let s = shared_for_test("good");
+        let agent = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        let propose = handle_request(&s, &cap_req("good", json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","confidence":0.9})));
+        let claim_id = propose.data.unwrap()["claimId"].as_str().unwrap().to_string();
+
+        let resp = handle_request(&s, &cap_req("good", json!({"type":"CLEAR_INVOKED","agentId":agent})));
+        assert!(resp.ok);
+        assert_eq!(resp.data.unwrap()["generation"], 2);
+        let st = s.state.lock().unwrap();
+        assert_eq!(st.agent_state(&agent), Some(crate::cap::AgentState::Discovery));
+        assert_eq!(st.claims.get(&claim_id).unwrap().status, crate::cap::ClaimStatus::Released);
+    }
+
+    #[test]
+    fn clear_invoked_unknown_agent_errors() {
+        let s = shared_for_test("good");
+        let resp = handle_request(&s, &cap_req("good", json!({"type":"CLEAR_INVOKED","agentId":"agent-404"})));
         assert_eq!(resp.error.as_deref(), Some("AGENT_NOT_FOUND"));
     }
 

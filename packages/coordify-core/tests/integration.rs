@@ -419,6 +419,55 @@ fn claim_proposed_and_released_over_socket() {
     assert_eq!(send_line(&mut stream, &release)["ok"], true);
 }
 
+#[test]
+fn agent_state_change_over_socket() {
+    let core = spawn_core("state");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
+    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+
+    let good = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"AGENT_STATE_CHANGED","agentId":"{}","state":"ACTIVE"}}}}"#,
+        token, agent
+    );
+    assert_eq!(send_line(&mut stream, &good)["ok"], true);
+
+    // Active -> WAITING_USER is not a legal direct transition.
+    let bad = format!(
+        r#"{{"id":"3","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"AGENT_STATE_CHANGED","agentId":"{}","state":"WAITING_USER"}}}}"#,
+        token, agent
+    );
+    let resp = send_line(&mut stream, &bad);
+    assert_eq!(resp["ok"], false);
+    assert_eq!(resp["error"], "INVALID_STATE_TRANSITION");
+}
+
+#[test]
+fn clear_invoked_over_socket_releases_and_bumps_generation() {
+    let core = spawn_core("clear");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
+    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+
+    let propose = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","confidence":0.9}}}}"#,
+        token, agent
+    );
+    assert_eq!(send_line(&mut stream, &propose)["data"]["status"], "ACTIVE");
+
+    let clear = format!(
+        r#"{{"id":"3","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLEAR_INVOKED","agentId":"{}"}}}}"#,
+        token, agent
+    );
+    let resp = send_line(&mut stream, &clear);
+    assert_eq!(resp["ok"], true);
+    assert_eq!(resp["data"]["generation"], 2);
+}
+
 // ---------------------------------------------------------------------------
 // Target E11: a file at <root>/.coordify/runtime prevents create_dir_all from
 // succeeding → acquire_lock errors → process exits 1.
