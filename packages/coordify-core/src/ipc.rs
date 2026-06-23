@@ -12,6 +12,8 @@ pub struct Request {
     pub meta: Value,
     #[serde(default)]
     pub event: Value,
+    #[serde(default, rename = "capVersion")]
+    pub cap_version: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq)]
@@ -22,17 +24,22 @@ pub struct Response {
     pub agent_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub error: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data: Option<Value>,
 }
 
 impl Response {
     pub fn ok_for(id: &str) -> Self {
-        Self { id: id.to_string(), ok: true, agent_id: None, error: None }
+        Self { id: id.to_string(), ok: true, agent_id: None, error: None, data: None }
     }
     pub fn ok_with_agent(id: &str, agent_id: &str) -> Self {
-        Self { id: id.to_string(), ok: true, agent_id: Some(agent_id.to_string()), error: None }
+        Self { id: id.to_string(), ok: true, agent_id: Some(agent_id.to_string()), error: None, data: None }
     }
     pub fn err(id: &str, msg: &str) -> Self {
-        Self { id: id.to_string(), ok: false, agent_id: None, error: Some(msg.to_string()) }
+        Self { id: id.to_string(), ok: false, agent_id: None, error: Some(msg.to_string()), data: None }
+    }
+    pub fn ok_with_data(id: &str, data: Value) -> Self {
+        Self { id: id.to_string(), ok: true, agent_id: None, error: None, data: Some(data) }
     }
 }
 
@@ -78,5 +85,17 @@ mod tests {
     #[test]
     fn rejects_malformed_json() {
         assert!(decode_request("{not json").is_err());
+    }
+
+    #[test]
+    fn request_defaults_cap_version_to_none_and_response_omits_data() {
+        let line = r#"{"id":"r1","token":"t","action":"submit_event","event":{"type":"X"}}"#;
+        let req = decode_request(line).unwrap();
+        assert_eq!(req.cap_version, None);
+        // ok_for omits data
+        assert_eq!(encode_response(&Response::ok_for("r1")), r#"{"id":"r1","ok":true}"#);
+        // ok_with_data includes it
+        let r = Response::ok_with_data("r1", serde_json::json!({"claimId":"claim-1"}));
+        assert!(encode_response(&r).contains(r#""data":{"claimId":"claim-1"}"#));
     }
 }

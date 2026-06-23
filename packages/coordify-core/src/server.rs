@@ -249,6 +249,7 @@ mod tests {
             agent_id: None,
             meta: json!({}),
             event: json!({}),
+            cap_version: None,
         }
     }
 

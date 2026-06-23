@@ -1,28 +1,42 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
+use crate::cap::AgentState;
+use crate::claim::ClaimStore;
 
 #[derive(Debug, Clone)]
 pub struct Agent {
     pub id: String,
     pub last_seen_ms: u64,
     pub meta: serde_json::Value,
+    pub state: AgentState,
+    pub generation: u64,
 }
 
 pub struct State {
     agents: HashMap<String, Agent>,
+    pub claims: ClaimStore,
     next_id: u64,
 }
 
 impl State {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self { agents: HashMap::new(), next_id: 1 }
+        Self { agents: HashMap::new(), claims: ClaimStore::new(), next_id: 1 }
     }
 
     pub fn register(&mut self, meta: serde_json::Value, now_ms: u64) -> String {
         let id = format!("agent-{}", self.next_id);
         self.next_id += 1;
-        self.agents.insert(id.clone(), Agent { id: id.clone(), last_seen_ms: now_ms, meta });
+        self.agents.insert(
+            id.clone(),
+            Agent {
+                id: id.clone(),
+                last_seen_ms: now_ms,
+                meta,
+                state: AgentState::Discovery,
+                generation: 1,
+            },
+        );
         id
     }
 
@@ -53,6 +67,77 @@ impl State {
     pub fn agent_count(&self) -> usize {
         self.agents.len()
     }
+
+    pub fn agent_state(&self, id: &str) -> Option<AgentState> {
+        self.agents.get(id).map(|a| a.state)
+    }
+
+    pub fn set_state(&mut self, id: &str, to: AgentState) -> Result<(), StateError> {
+        let agent = self.agents.get_mut(id).ok_or(StateError::AgentNotFound)?;
+        if !can_transition(agent.state, to) {
+            return Err(StateError::InvalidTransition);
+        }
+        agent.state = to;
+        Ok(())
+    }
+
+    /// /clear: reset to DISCOVERY and bump generation. Returns the new
+    /// generation, or None if the agent is unknown.
+    pub fn clear(&mut self, id: &str) -> Option<u64> {
+        let agent = self.agents.get_mut(id)?;
+        agent.state = AgentState::Discovery;
+        agent.generation += 1;
+        Some(agent.generation)
+    }
+
+    /// Promote a DISCOVERY agent to ACTIVE after an accepted claim (CAP_SPEC §7).
+    pub fn promote_active(&mut self, id: &str) {
+        if let Some(agent) = self.agents.get_mut(id) {
+            if agent.state == AgentState::Discovery {
+                agent.state = AgentState::Active;
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub enum StateError {
+    AgentNotFound,
+    InvalidTransition,
+}
+
+/// Allowed AGENT_STATE_CHANGED transitions (CAP_SPEC §7). Offline is reachable
+/// from any live state; a same-state report is a no-op (allowed). Discovery is
+/// re-entered only via /clear (State::clear), not via set_state.
+pub fn can_transition(from: AgentState, to: AgentState) -> bool {
+    use AgentState::*;
+    if from == to {
+        return true;
+    }
+    if to == Offline {
+        return true;
+    }
+    matches!(
+        (from, to),
+        (Discovery, Active)
+            | (Discovery, Idle)
+            | (Active, Idle)
+            | (Active, SubagentWaiting)
+            | (Active, Testing)
+            | (Active, Negotiating)
+            | (Active, Blocked)
+            | (Idle, Active)
+            | (SubagentWaiting, Active)
+            | (SubagentWaiting, Idle)
+            | (Testing, Active)
+            | (Testing, Idle)
+            | (Negotiating, WaitingUser)
+            | (Negotiating, Active)
+            | (Blocked, Active)
+            | (Blocked, WaitingUser)
+            | (WaitingUser, Active)
+            | (WaitingUser, Idle)
+    )
 }
 
 pub fn now_ms() -> u64 {
@@ -112,5 +197,50 @@ mod tests {
         let id = s.register(json!({}), 1000);
         assert!(s.remove(&id));
         assert!(!s.remove(&id));
+    }
+
+    #[test]
+    fn register_starts_in_discovery_generation_one() {
+        let mut s = State::new();
+        let id = s.register(serde_json::json!({}), 1000);
+        assert_eq!(s.agent_state(&id), Some(crate::cap::AgentState::Discovery));
+    }
+
+    #[test]
+    fn set_state_enforces_transition_rules() {
+        use crate::cap::AgentState::*;
+        let mut s = State::new();
+        let id = s.register(serde_json::json!({}), 1000);
+        // Discovery -> Active is allowed; Discovery -> Testing is not.
+        assert!(s.set_state(&id, Active).is_ok());
+        assert!(s.set_state(&id, Testing).is_ok()); // Active -> Testing ok
+        assert_eq!(s.set_state(&id, SubagentWaiting), Err(super::StateError::InvalidTransition)); // Testing -> SubagentWaiting not allowed
+        assert_eq!(s.set_state("agent-999", Idle), Err(super::StateError::AgentNotFound));
+        // Any -> Offline allowed
+        assert!(s.set_state(&id, Offline).is_ok());
+    }
+
+    #[test]
+    fn clear_resets_to_discovery_and_bumps_generation() {
+        use crate::cap::AgentState::*;
+        let mut s = State::new();
+        let id = s.register(serde_json::json!({}), 1000);
+        s.set_state(&id, Active).unwrap();
+        let gen = s.clear(&id).unwrap();
+        assert_eq!(gen, 2);
+        assert_eq!(s.agent_state(&id), Some(Discovery));
+        assert_eq!(s.clear("agent-999"), None);
+    }
+
+    #[test]
+    fn promote_active_only_from_discovery() {
+        use crate::cap::AgentState::*;
+        let mut s = State::new();
+        let id = s.register(serde_json::json!({}), 1000);
+        s.promote_active(&id);
+        assert_eq!(s.agent_state(&id), Some(Active));
+        // From Active, promote is a no-op (stays Active).
+        s.promote_active(&id);
+        assert_eq!(s.agent_state(&id), Some(Active));
     }
 }
