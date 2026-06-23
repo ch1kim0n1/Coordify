@@ -72,7 +72,10 @@ function mapEvent(hook, payload) {
       const tool = payload.tool_name || '';
       const ti = payload.tool_input || {};
       if (tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit') {
-        return { kind: 'record', record: { type: 'FILE_TOUCHED', tool, file: ti.file_path || ti.path || null } };
+        const file = ti.file_path || ti.path;
+        return file
+          ? { kind: 'forward', event: { type: 'FILE_TOUCHED', files: [file] } }
+          : { kind: 'record', record: { type: 'FILE_TOUCHED', tool, file: null } };
       }
       if (tool === 'Read') {
         return { kind: 'record', record: { type: 'FILE_READ', tool, file: ti.file_path || ti.path || null } };

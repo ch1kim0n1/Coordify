@@ -59,8 +59,20 @@ test('PreToolUse -> recorded TOOL_PRECHECK / RISKY_WRITE_CHECKED', () => {
   assert.equal(mapEvent('PreToolUse', { tool_name: 'Edit', tool_input: { file_path: 'a' } }).record.type, 'RISKY_WRITE_CHECKED');
 });
 
-test('PostToolUse -> recorded file/read/command', () => {
-  assert.equal(mapEvent('PostToolUse', { tool_name: 'Write', tool_input: { file_path: 'src/x.rs' } }).record.type, 'FILE_TOUCHED');
+test('PostToolUse Edit/Write -> forwarded FILE_TOUCHED', () => {
+  const w = mapEvent('PostToolUse', { tool_name: 'Write', tool_input: { file_path: 'src/x.rs' } });
+  assert.equal(w.kind, 'forward');
+  assert.equal(w.event.type, 'FILE_TOUCHED');
+  assert.deepEqual(w.event.files, ['src/x.rs']);
+  const e = mapEvent('PostToolUse', { tool_name: 'Edit', tool_input: { file_path: 'src/y.rs' } });
+  assert.equal(e.kind, 'forward');
+  assert.deepEqual(e.event.files, ['src/y.rs']);
+  // Read + Bash stay recorded-only.
+  assert.equal(mapEvent('PostToolUse', { tool_name: 'Read', tool_input: { file_path: 'r' } }).kind, 'record');
+  assert.equal(mapEvent('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' } }).kind, 'record');
+});
+
+test('PostToolUse -> recorded file/read/command (Read/Bash only)', () => {
   assert.equal(mapEvent('PostToolUse', { tool_name: 'Read', tool_input: { file_path: 'src/x.rs' } }).record.type, 'FILE_READ');
   assert.equal(mapEvent('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'cargo test' } }).record.type, 'TEST_RUN');
   assert.equal(mapEvent('PostToolUse', { tool_name: 'Bash', tool_input: { command: 'ls' } }).record.type, 'COMMAND_EXECUTED');
