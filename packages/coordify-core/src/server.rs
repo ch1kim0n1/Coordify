@@ -1,5 +1,7 @@
 use crate::cap::{self, CapErrorCode, CapEvent, ClaimStatus};
 use crate::eventlog::EventLog;
+use crate::heat::{self, HeatBand, HeatConfig, Knowledge};
+use crate::heatstore::HeatStore;
 use crate::ipc::{decode_request, encode_response, Request, Response};
 use crate::paths::Paths;
 use crate::session::{finalize, Session};
@@ -15,6 +17,9 @@ pub struct Shared {
     pub token: String,
     pub agents_seen: Mutex<u64>,
     pub finalized: AtomicBool,
+    pub heat: Mutex<HeatStore>,
+    pub heat_cfg: HeatConfig,
+    pub knowledge: Knowledge,
 }
 
 pub fn handle_request(shared: &Shared, req: &Request) -> Response {
@@ -121,6 +126,7 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                         "ts": crate::bootstrap::now_iso(),
                     });
                     let _ = shared.log.lock().unwrap().append(&event);
+                    recompute_current_heat(shared, &agent_id);
                     Response::ok_with_data(
                         &req.id,
                         serde_json::json!({"claimId": claim.claim_id, "status": claim.status.as_str()}),
@@ -157,6 +163,7 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                 "ts": crate::bootstrap::now_iso(),
             });
             let _ = shared.log.lock().unwrap().append(&log_event);
+            recompute_current_heat(shared, &agent_id);
             Response::ok_for(&req.id)
         }
         CapEvent::AgentStateChanged { agent_id, state } => {
@@ -220,7 +227,84 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                     "ts": crate::bootstrap::now_iso(),
                 }));
             }
+            recompute_current_heat(shared, &agent_id);
             Response::ok_with_data(&req.id, serde_json::json!({"generation": generation}))
+        }
+    }
+}
+
+fn escalation(band: HeatBand) -> Option<(u32, &'static str)> {
+    match band {
+        HeatBand::Overlap => Some((2, "COORDINATE_BEFORE_WRITE")),
+        HeatBand::ConflictCandidate => Some((3, "ASK_USER")),
+        _ => None,
+    }
+}
+
+/// Recompute heat edges touching `agent_id` after its claim/state changed.
+/// If the agent has no live claim, its edges are dropped instead.
+fn recompute_current_heat(shared: &Shared, agent_id: &str) {
+    // Snapshot inputs under a short state lock.
+    let (mine, others) = {
+        let st = shared.state.lock().unwrap();
+        let mine = st.heat_inputs_for(agent_id);
+        let others: Vec<heat::HeatInputs> = match &mine {
+            Some(_) => st
+                .agent_ids()
+                .into_iter()
+                .filter(|id| id != agent_id)
+                .filter_map(|id| st.heat_inputs_for(&id))
+                .collect(),
+            None => Vec::new(),
+        };
+        (mine, others)
+    };
+
+    let mine = match mine {
+        Some(m) => m,
+        None => {
+            // No live claim: drop this agent's edges.
+            shared.heat.lock().unwrap().remove_agent(agent_id);
+            return;
+        }
+    };
+
+    // Compute (pure), then upsert + log.
+    let mut updates = Vec::new();
+    for other in &others {
+        let result = heat::compute_heat(&mine, other, &shared.knowledge, &shared.heat_cfg);
+        updates.push((other.agent_id.clone(), result));
+    }
+    {
+        let mut store = shared.heat.lock().unwrap();
+        for (other_id, result) in &updates {
+            store.upsert(agent_id, other_id, result.clone());
+        }
+    }
+    {
+        let mut log = shared.log.lock().unwrap();
+        for (other_id, result) in &updates {
+            let components = serde_json::to_value(&result.components).unwrap_or(serde_json::Value::Null);
+            let _ = log.append(&serde_json::json!({
+                "type": "HEAT_UPDATED",
+                "pair": [agent_id, other_id],
+                "heat": result.heat,
+                "heatKind": "CURRENT",
+                "band": result.band.as_str(),
+                "components": components,
+                "reasons": result.reasons,
+                "ts": crate::bootstrap::now_iso(),
+            }));
+            if let Some((level, action)) = escalation(result.band) {
+                let _ = log.append(&serde_json::json!({
+                    "type": "HEAT_THRESHOLD_EXCEEDED",
+                    "pair": [agent_id, other_id],
+                    "heat": result.heat,
+                    "escalationLevel": level,
+                    "requiredAction": action,
+                    "ts": crate::bootstrap::now_iso(),
+                }));
+            }
         }
     }
 }
@@ -297,6 +381,9 @@ pub fn run(
         token,
         agents_seen: Mutex::new(0),
         finalized: AtomicBool::new(false),
+        heat: Mutex::new(HeatStore::new()),
+        heat_cfg: HeatConfig::default(),
+        knowledge: Knowledge::default(),
     });
 
     let interval_ms = std::env::var("COORDIFY_REAPER_INTERVAL_MS")
@@ -441,6 +528,9 @@ mod tests {
             token: token.to_string(),
             agents_seen: Mutex::new(0),
             finalized: AtomicBool::new(false),
+            heat: Mutex::new(HeatStore::new()),
+            heat_cfg: HeatConfig::default(),
+            knowledge: Knowledge::default(),
         })
     }
 
@@ -615,6 +705,21 @@ mod tests {
         let s = shared_for_test("good");
         let resp = handle_request(&s, &cap_req("good", json!({"type":"CLEAR_INVOKED","agentId":"agent-404"})));
         assert_eq!(resp.error.as_deref(), Some("AGENT_NOT_FOUND"));
+    }
+
+    #[test]
+    fn current_heat_edge_created_between_two_claiming_agents() {
+        let s = shared_for_test("good");
+        // Two agents, both register with branch main and propose overlapping claims.
+        let a = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let b = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let mk = |agent: &str| json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{"summary":"fix session expiry"},"confidence":0.9});
+        assert!(handle_request(&s, &cap_req("good", mk(&a))).ok);
+        assert!(handle_request(&s, &cap_req("good", mk(&b))).ok);
+        // Edge a<->b exists with high heat (same intent+file+domain+branch).
+        let store = s.heat.lock().unwrap();
+        let edge = store.get(&a, &b).expect("edge missing");
+        assert!(edge.heat >= 70, "expected high heat, got {}", edge.heat);
     }
 
     #[test]

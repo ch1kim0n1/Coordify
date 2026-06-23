@@ -107,17 +107,35 @@ impl State {
         }
     }
 
+    /// Return all agent IDs that are either currently connected or own a live
+    /// claim (so heat can be computed even for ghost agents that disconnected
+    /// cleanly without releasing their claims).
+    pub fn agent_ids(&self) -> Vec<String> {
+        let mut ids: std::collections::HashSet<String> =
+            self.agents.keys().cloned().collect();
+        for id in self.claims.live_claim_agent_ids() {
+            ids.insert(id);
+        }
+        ids.into_iter().collect()
+    }
+
     pub fn heat_inputs_for(&self, agent_id: &str) -> Option<HeatInputs> {
-        let agent = self.agents.get(agent_id)?;
         let claim = self.claims.live_claim_for(agent_id)?;
+        // Use the agent's recorded metadata when available; fall back to
+        // defaults for ghost agents (disconnected but with live claims).
+        let (last_seen_ms, branch) = self
+            .agents
+            .get(agent_id)
+            .map(|a| (a.last_seen_ms, a.branch.clone()))
+            .unwrap_or((0, None));
         Some(HeatInputs {
             agent_id: agent_id.to_string(),
             intent: claim.intent.clone(),
             domains: claim.domains.iter().cloned().collect(),
             files: claim.estimated_files.iter().cloned().collect(),
             task_tokens: crate::heat::tokens(&claim.task_summary),
-            last_seen_ms: agent.last_seen_ms,
-            branch: agent.branch.clone(),
+            last_seen_ms,
+            branch,
         })
     }
 }
