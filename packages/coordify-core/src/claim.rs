@@ -139,6 +139,10 @@ impl ClaimStore {
         self.claims.get(claim_id)
     }
 
+    pub fn has_orphaned(&self) -> bool {
+        self.claims.values().any(|c| c.status == ClaimStatus::Orphaned)
+    }
+
     pub fn len(&self) -> usize {
         self.claims.len()
     }

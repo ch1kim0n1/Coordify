@@ -299,12 +299,17 @@ pub fn run(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(10_000);
+    let orphan_ttl_ms = std::env::var("COORDIFY_ORPHAN_TTL_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(300_000);
     let _reaper = spawn_reaper(
         Arc::clone(&shared),
         session.clone(),
         Paths::new(paths.root.clone()),
         interval_ms,
         timeout_ms,
+        orphan_ttl_ms,
     );
 
     for conn in listener.incoming() {
@@ -339,32 +344,66 @@ pub fn spawn_reaper(
     paths: Paths,
     interval_ms: u64,
     timeout_ms: u64,
+    orphan_ttl_ms: u64,
 ) -> std::thread::JoinHandle<()> {
     std::thread::spawn(move || loop {
         std::thread::sleep(std::time::Duration::from_millis(interval_ms));
+        let now = now_ms();
         let lost = {
             let mut st = shared.state.lock().unwrap();
-            st.reap(now_ms(), timeout_ms)
+            st.reap(now, timeout_ms)
         };
+        // Orphan each lost agent's live claims (collect under a short lock).
+        let mut orphaned: Vec<(String, String)> = Vec::new(); // (claimId, previousOwner)
         if !lost.is_empty() {
-            // Hold the log lock once for the whole batch so each (LOST, ORPHANED)
-            // pair is contiguous in the log.
+            let mut st = shared.state.lock().unwrap();
+            for id in &lost {
+                for claim_id in st.claims.orphan_for_agent(id, now) {
+                    orphaned.push((claim_id, id.clone()));
+                }
+            }
+        }
+        let reclaimable = {
+            let mut st = shared.state.lock().unwrap();
+            st.claims.sweep_reclaimable(now, orphan_ttl_ms)
+        };
+
+        if !lost.is_empty() || !orphaned.is_empty() || !reclaimable.is_empty() {
+            let ttl_seconds = orphan_ttl_ms / 1000;
             let mut log = shared.log.lock().unwrap();
             for id in &lost {
                 let _ = log.append(&serde_json::json!({
-                    "type": "AGENT_LOST", "agentId": id, "ts": crate::bootstrap::now_iso(),
+                    "type": "AGENT_LOST",
+                    "agentId": id,
+                    "ts": crate::bootstrap::now_iso(),
                 }));
+            }
+            for (claim_id, previous_owner) in &orphaned {
                 let _ = log.append(&serde_json::json!({
-                    "type": "CLAIM_ORPHANED", "agentId": id, "ts": crate::bootstrap::now_iso(),
+                    "type": "CLAIM_ORPHANED",
+                    "claimId": claim_id,
+                    "previousOwner": previous_owner,
+                    "ttlSeconds": ttl_seconds,
+                    "ts": crate::bootstrap::now_iso(),
+                }));
+            }
+            for claim_id in &reclaimable {
+                let _ = log.append(&serde_json::json!({
+                    "type": "CLAIM_RECLAIMABLE",
+                    "claimId": claim_id,
+                    "ts": crate::bootstrap::now_iso(),
                 }));
             }
         }
-        // If the reaper just emptied a network that had agents, finalize and exit:
-        // the serialized accept loop may be blocked on join() of a silent agent's
-        // still-open connection and cannot finalize on its own.
-        let empty = shared.state.lock().unwrap().agent_count() == 0;
+
+        // Empty-network finalize (unchanged from Phase 1).
+        let (empty, no_orphans) = {
+            let st = shared.state.lock().unwrap();
+            (st.agent_count() == 0, !st.claims.has_orphaned())
+        };
         let seen = *shared.agents_seen.lock().unwrap();
         if empty
+            && no_orphans
             && seen > 0
             && shared.finalized.compare_exchange(false, true, SeqCst, SeqCst).is_ok()
         {

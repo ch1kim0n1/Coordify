@@ -181,25 +181,23 @@ fn last_agent_leaving_finalizes_session() {
 }
 
 #[test]
-fn reaper_logs_agent_lost_for_silent_agent() {
+fn reaper_logs_agent_lost_and_orphans_claim() {
     let core = spawn_core_fast_reaper("reap");
     let token = read_token(&core.root);
     let sock = core.root.join(".coordify/runtime/core.sock");
 
-    // Register, then keep the connection OPEN but send no heartbeats so the
-    // reaper times the agent out while it is still "connected".
     let mut stream = connect_retry(&sock);
-    let reg = format!(
-        r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
-        token
+    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
+    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+    let propose = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","confidence":0.9}}}}"#,
+        token, agent
     );
-    let resp = send_line(&mut stream, &reg);
-    assert_eq!(resp["ok"], true);
+    assert_eq!(send_line(&mut stream, &propose)["ok"], true);
 
-    // Wait past the 300ms timeout + a reaper tick.
+    // Keep the connection open, send no heartbeats; reaper times the agent out.
     std::thread::sleep(Duration::from_millis(700));
 
-    // Find the events.log and assert AGENT_LOST + CLAIM_ORPHANED are present.
     let sessions = core.root.join(".coordify/sessions");
     let mut log_contents = String::new();
     if let Ok(entries) = std::fs::read_dir(&sessions) {
@@ -210,10 +208,8 @@ fn reaper_logs_agent_lost_for_silent_agent() {
             }
         }
     }
-    assert!(log_contents.contains("AGENT_LOST"), "no AGENT_LOST event logged");
-    assert!(log_contents.contains("CLAIM_ORPHANED"), "no CLAIM_ORPHANED event logged");
-
-    // Keep the stream alive until assertions are done.
+    assert!(log_contents.contains("AGENT_LOST"), "no AGENT_LOST logged");
+    assert!(log_contents.contains("CLAIM_ORPHANED"), "no CLAIM_ORPHANED logged");
     drop(stream);
 }
 
@@ -466,6 +462,54 @@ fn clear_invoked_over_socket_releases_and_bumps_generation() {
     let resp = send_line(&mut stream, &clear);
     assert_eq!(resp["ok"], true);
     assert_eq!(resp["data"]["generation"], 2);
+}
+
+fn spawn_core_fast_orphan(tag: &str) -> Spawned {
+    let root = temp_root(tag);
+    let child = Command::new(env!("CARGO_BIN_EXE_coordify-core"))
+        .arg("--root")
+        .arg(&root)
+        .env("COORDIFY_REAPER_INTERVAL_MS", "100")
+        .env("COORDIFY_REAPER_TIMEOUT_MS", "300")
+        .env("COORDIFY_ORPHAN_TTL_MS", "300")
+        .spawn()
+        .expect("failed to spawn coordify-core");
+    let sock = root.join(".coordify/runtime/core.sock");
+    assert!(wait_for(&sock, Duration::from_secs(5)), "socket never appeared");
+    Spawned { child, root }
+}
+
+#[test]
+fn orphaned_claim_becomes_reclaimable_after_ttl() {
+    let core = spawn_core_fast_orphan("orph");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
+    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+    let propose = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","confidence":0.9}}}}"#,
+        token, agent
+    );
+    assert_eq!(send_line(&mut stream, &propose)["ok"], true);
+
+    // Keep socket open, no heartbeat: reaped at ~300ms (CLAIM_ORPHANED), then
+    // swept to RECLAIMABLE once orphaned >= 300ms TTL on a later tick.
+    std::thread::sleep(Duration::from_millis(1200));
+
+    let sessions = core.root.join(".coordify/sessions");
+    let mut log_contents = String::new();
+    if let Ok(entries) = std::fs::read_dir(&sessions) {
+        for e in entries.flatten() {
+            let log = e.path().join("events.log");
+            if log.exists() {
+                log_contents = std::fs::read_to_string(log).unwrap();
+            }
+        }
+    }
+    assert!(log_contents.contains("CLAIM_ORPHANED"), "no CLAIM_ORPHANED");
+    assert!(log_contents.contains("CLAIM_RECLAIMABLE"), "claim never became RECLAIMABLE");
+    drop(stream);
 }
 
 // ---------------------------------------------------------------------------
