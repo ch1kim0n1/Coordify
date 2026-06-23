@@ -396,14 +396,14 @@ pub fn spawn_reaper(
             }
         }
 
-        // Empty-network finalize (unchanged from Phase 1).
-        let (empty, no_orphans) = {
-            let st = shared.state.lock().unwrap();
-            (st.agent_count() == 0, !st.claims.has_orphaned())
-        };
+        // Empty-network finalize: the last agent leaving ends the session
+        // immediately (ARCHITECTURE §15). Note: because the accept loop is
+        // serialized and a fully-empty network finalizes here, the orphan ->
+        // RECLAIMABLE sweep above is only reachable once concurrent connections
+        // are supported (later phase); its logic is unit-tested in claim.rs.
+        let empty = shared.state.lock().unwrap().agent_count() == 0;
         let seen = *shared.agents_seen.lock().unwrap();
         if empty
-            && no_orphans
             && seen > 0
             && shared.finalized.compare_exchange(false, true, SeqCst, SeqCst).is_ok()
         {
