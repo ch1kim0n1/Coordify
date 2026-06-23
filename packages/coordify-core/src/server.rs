@@ -371,17 +371,18 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
                         mine.domains.union(&other.domains).cloned().collect();
                     let intents = vec![mine.intent.clone(), other.intent.clone()];
                     if let Some(c) = cstore.open(agent_id, other_id, result.heat, paths, domains, intents) {
+                        let ts = crate::bootstrap::now_iso();
                         conflict_events.push(serde_json::json!({
                             "type": "CONFLICT_OPENED",
                             "conflictId": c.conflict_id,
                             "agents": [c.agents.0, c.agents.1],
-                            "openedAt": crate::bootstrap::now_iso(),
+                            "openedAt": ts,
                             "trigger": {"type": "HEAT_THRESHOLD", "heat": c.trigger_heat},
                             "paths": c.paths,
                             "domains": c.domains,
                             "intents": c.intents,
                             "requiredAction": "NEGOTIATE_OR_REASSIGN",
-                            "ts": crate::bootstrap::now_iso(),
+                            "ts": ts,
                         }));
                     }
                 }
