@@ -8,6 +8,7 @@ pub const PROVISIONAL_MIN: f64 = 0.45;
 pub struct Claim {
     pub claim_id: String,
     pub agent_id: String,
+    pub task_summary: String,
     pub status: ClaimStatus,
     pub intent: String,
     pub domains: Vec<String>,
@@ -43,6 +44,7 @@ impl ClaimStore {
     pub fn propose(
         &mut self,
         agent_id: &str,
+        task_summary: String,
         intent: String,
         domains: Vec<String>,
         estimated_files: Vec<String>,
@@ -54,6 +56,7 @@ impl ClaimStore {
         let claim = Claim {
             claim_id: claim_id.clone(),
             agent_id: agent_id.to_string(),
+            task_summary,
             status,
             intent,
             domains,
@@ -63,6 +66,13 @@ impl ClaimStore {
         };
         self.claims.insert(claim_id, claim.clone());
         Some(claim)
+    }
+
+    pub fn live_claim_for(&self, agent_id: &str) -> Option<&Claim> {
+        self.claims.values().find(|c| {
+            c.agent_id == agent_id
+                && matches!(c.status, ClaimStatus::Active | ClaimStatus::Provisional)
+        })
     }
 
     /// Mark a single claim RELEASED. Returns false if the claim does not exist
@@ -170,26 +180,26 @@ mod tests {
     #[test]
     fn propose_assigns_sequential_ids_and_rejects_low_confidence() {
         let mut s = ClaimStore::new();
-        let c1 = s.propose("agent-1", "BUGFIX".into(), vec![], vec![], 0.9).unwrap();
+        let c1 = s.propose("agent-1", "t".into(), "BUGFIX".into(), vec![], vec![], 0.9).unwrap();
         assert_eq!(c1.claim_id, "claim-1");
         assert_eq!(c1.status, ClaimStatus::Active);
-        let c2 = s.propose("agent-1", "QA".into(), vec![], vec![], 0.5).unwrap();
+        let c2 = s.propose("agent-1", "t".into(), "QA".into(), vec![], vec![], 0.5).unwrap();
         assert_eq!(c2.claim_id, "claim-2");
         assert_eq!(c2.status, ClaimStatus::Provisional);
-        assert!(s.propose("agent-1", "QA".into(), vec![], vec![], 0.1).is_none());
+        assert!(s.propose("agent-1", "t".into(), "QA".into(), vec![], vec![], 0.1).is_none());
         assert_eq!(s.len(), 2);
     }
 
     #[test]
     fn release_and_release_for_agent() {
         let mut s = ClaimStore::new();
-        let c = s.propose("agent-1", "BUGFIX".into(), vec![], vec![], 0.9).unwrap();
+        let c = s.propose("agent-1", "t".into(), "BUGFIX".into(), vec![], vec![], 0.9).unwrap();
         assert!(s.release(&c.claim_id));
         assert_eq!(s.get(&c.claim_id).unwrap().status, ClaimStatus::Released);
         assert!(!s.release("claim-999"));
 
-        let a = s.propose("agent-2", "QA".into(), vec![], vec![], 0.9).unwrap();
-        let _b = s.propose("agent-2", "FEATURE".into(), vec![], vec![], 0.5).unwrap();
+        let a = s.propose("agent-2", "t".into(), "QA".into(), vec![], vec![], 0.9).unwrap();
+        let _b = s.propose("agent-2", "t".into(), "FEATURE".into(), vec![], vec![], 0.5).unwrap();
         let released = s.release_for_agent("agent-2");
         assert_eq!(released.len(), 2);
         assert_eq!(s.get(&a.claim_id).unwrap().status, ClaimStatus::Released);
@@ -198,11 +208,11 @@ mod tests {
     #[test]
     fn release_only_succeeds_on_live_claim() {
         let mut s = ClaimStore::new();
-        let c = s.propose("agent-1", "BUGFIX".into(), vec![], vec![], 0.9).unwrap();
+        let c = s.propose("agent-1", "t".into(), "BUGFIX".into(), vec![], vec![], 0.9).unwrap();
         assert!(s.release(&c.claim_id)); // Active -> Released: ok
         assert!(!s.release(&c.claim_id)); // already Released: no-op, false
         // Orphaned claim cannot be released either.
-        let d = s.propose("agent-2", "QA".into(), vec![], vec![], 0.9).unwrap();
+        let d = s.propose("agent-2", "t".into(), "QA".into(), vec![], vec![], 0.9).unwrap();
         s.orphan_for_agent("agent-2", 1_000);
         assert!(!s.release(&d.claim_id));
     }
@@ -210,7 +220,7 @@ mod tests {
     #[test]
     fn orphan_then_sweep_reclaimable_respects_ttl() {
         let mut s = ClaimStore::new();
-        let c = s.propose("agent-1", "BUGFIX".into(), vec![], vec![], 0.9).unwrap();
+        let c = s.propose("agent-1", "t".into(), "BUGFIX".into(), vec![], vec![], 0.9).unwrap();
         let orphaned = s.orphan_for_agent("agent-1", 1_000);
         assert_eq!(orphaned, vec![c.claim_id.clone()]);
         assert_eq!(s.get(&c.claim_id).unwrap().status, ClaimStatus::Orphaned);
@@ -222,5 +232,13 @@ mod tests {
         let swept = s.sweep_reclaimable(2_000, 1_000);
         assert_eq!(swept, vec![c.claim_id.clone()]);
         assert_eq!(s.get(&c.claim_id).unwrap().status, ClaimStatus::Reclaimable);
+    }
+
+    #[test]
+    fn is_empty_reflects_contents() {
+        let mut s = ClaimStore::new();
+        assert!(s.is_empty());
+        s.propose("agent-1", "t".into(), "BUGFIX".into(), vec![], vec![], 0.9);
+        assert!(!s.is_empty());
     }
 }

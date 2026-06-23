@@ -464,6 +464,131 @@ fn clear_invoked_over_socket_releases_and_bumps_generation() {
     assert_eq!(resp["data"]["generation"], 2);
 }
 
+#[test]
+fn overlapping_claims_emit_heat_updated() {
+    let core = spawn_core("heat");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+
+    // The Phase-1 server accepts connections serially (join-per-connection), so
+    // two agents must be registered on a single connection to be simultaneously
+    // live.  Agent B is registered after A so that when A claims, B is already
+    // in state; when B then claims, recompute_current_heat sees A's live claim
+    // and emits HEAT_UPDATED + HEAT_THRESHOLD_EXCEEDED for the A<->B edge.
+    let mut stream = connect_retry(&sock);
+
+    let reg_a = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let agent_a = send_line(&mut stream, &reg_a)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let reg_b = format!(
+        r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let agent_b = send_line(&mut stream, &reg_b)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    // A claims — no heat edge yet (B has no live claim).
+    let claim_a = format!(
+        r#"{{"id":"3","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+        token, agent_a
+    );
+    assert_eq!(send_line(&mut stream, &claim_a)["ok"], true);
+
+    // B claims — overlapping with A → heat edge A<->B emitted.
+    let claim_b = format!(
+        r#"{{"id":"4","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+        token, agent_b
+    );
+    assert_eq!(send_line(&mut stream, &claim_b)["ok"], true);
+
+    drop(stream); // connection closed.
+
+    // events.log should contain HEAT_UPDATED for the A<->B pair.
+    let sessions = core.root.join(".coordify/sessions");
+    let mut log_contents = String::new();
+    // Poll until log is flushed (finalize can lag a moment).
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        if let Ok(entries) = std::fs::read_dir(&sessions) {
+            for e in entries.flatten() {
+                let log = e.path().join("events.log");
+                if log.exists() {
+                    log_contents = std::fs::read_to_string(log).unwrap();
+                }
+            }
+        }
+        if log_contents.contains("HEAT_UPDATED") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(log_contents.contains("HEAT_UPDATED"), "no HEAT_UPDATED logged");
+    assert!(
+        log_contents.contains("HEAT_THRESHOLD_EXCEEDED"),
+        "expected threshold exceeded for high overlap"
+    );
+}
+
+#[test]
+fn predicted_heat_calculated_logged_on_second_overlapping_claim() {
+    let core = spawn_core("pheat");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+
+    // Both agents must share one connection so both remain live simultaneously
+    // (the server finalizes when the last connected agent leaves; two separate
+    // connections would cause the server to exit after A disconnects).
+    let mut stream = connect_retry(&sock);
+
+    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let agent_a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
+
+    let claim_a = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+        token, agent_a
+    );
+    assert_eq!(send_line(&mut stream, &claim_a)["ok"], true);
+
+    let reg_b = format!(r#"{{"id":"3","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let agent_b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
+    let claim_b = format!(
+        r#"{{"id":"4","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+        token, agent_b
+    );
+    let resp = send_line(&mut stream, &claim_b);
+    assert_eq!(resp["ok"], true);
+    assert_eq!(resp["data"]["recommendation"], "NEGOTIATE_BEFORE_CLAIM");
+
+    drop(stream);
+
+    let sessions = core.root.join(".coordify/sessions");
+    let mut log_contents = String::new();
+    let start = std::time::Instant::now();
+    while start.elapsed() < std::time::Duration::from_secs(3) {
+        if let Ok(entries) = std::fs::read_dir(&sessions) {
+            for e in entries.flatten() {
+                let log = e.path().join("events.log");
+                if log.exists() {
+                    log_contents = std::fs::read_to_string(log).unwrap();
+                }
+            }
+        }
+        if log_contents.contains("PREDICTED_HEAT_CALCULATED") {
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+    }
+    assert!(log_contents.contains("PREDICTED_HEAT_CALCULATED"), "no PREDICTED_HEAT_CALCULATED logged");
+}
+
 // ---------------------------------------------------------------------------
 // Target E11: a file at <root>/.coordify/runtime prevents create_dir_all from
 // succeeding → acquire_lock errors → process exits 1.

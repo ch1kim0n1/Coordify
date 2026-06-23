@@ -221,4 +221,51 @@ mod tests {
         let missing_conf = json!({"type":"CLAIM_PROPOSED","agentId":"a","intent":"BUGFIX"});
         assert_eq!(decode_event(&missing_conf).unwrap_err(), CapErrorCode::SchemaValidationFailed);
     }
+
+    #[test]
+    fn intent_as_str_all_variants() {
+        use Intent::*;
+        let cases = [
+            (Security, "SECURITY"), (Qa, "QA"), (Testing, "TESTING"),
+            (Performance, "PERFORMANCE"), (Refactor, "REFACTOR"),
+            (Documentation, "DOCUMENTATION"), (Feature, "FEATURE"), (Bugfix, "BUGFIX"),
+            (Architecture, "ARCHITECTURE"), (Devops, "DEVOPS"), (Research, "RESEARCH"),
+            (Migration, "MIGRATION"), (Configuration, "CONFIGURATION"),
+            (Observability, "OBSERVABILITY"),
+        ];
+        for (v, s) in cases {
+            assert_eq!(v.as_str(), s);
+            assert_eq!(serde_json::to_value(v).unwrap(), serde_json::json!(s));
+        }
+    }
+
+    #[test]
+    fn claim_status_as_str_all_variants() {
+        use ClaimStatus::*;
+        let cases = [
+            (Proposed, "PROPOSED"), (Provisional, "PROVISIONAL"), (Active, "ACTIVE"),
+            (Released, "RELEASED"), (Orphaned, "ORPHANED"), (Reclaimable, "RECLAIMABLE"),
+            (Rejected, "REJECTED"),
+        ];
+        for (v, s) in cases {
+            assert_eq!(v.as_str(), s);
+            assert_eq!(serde_json::to_value(v).unwrap(), serde_json::json!(s));
+        }
+    }
+
+    #[test]
+    fn cap_error_code_as_str_all_variants() {
+        use CapErrorCode::*;
+        let cases = [
+            (SchemaValidationFailed, "SCHEMA_VALIDATION_FAILED"),
+            (InvalidStateTransition, "INVALID_STATE_TRANSITION"),
+            (AuthFailed, "AUTH_FAILED"), (ClaimConflict, "CLAIM_CONFLICT"),
+            (AgentNotFound, "AGENT_NOT_FOUND"), (ClaimNotFound, "CLAIM_NOT_FOUND"),
+            (CoreDegraded, "CORE_DEGRADED"), (Timeout, "TIMEOUT"),
+            (UnsupportedCapVersion, "UNSUPPORTED_CAP_VERSION"),
+        ];
+        for (v, s) in cases {
+            assert_eq!(v.as_str(), s);
+        }
+    }
 }
