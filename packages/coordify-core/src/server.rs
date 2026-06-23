@@ -283,13 +283,14 @@ struct PredictedEdge {
     reasons: Vec<String>,
 }
 
-/// Predicted heat of a proposed claim's inputs vs existing live-claim agents.
+/// Predicted heat of a proposed claim's inputs vs existing registered agents with live claims.
 fn predicted_heat(shared: &Shared, proposed: &heat::HeatInputs) -> Vec<PredictedEdge> {
     let others = {
         let st = shared.state.lock().unwrap();
-        st.live_claim_inputs_all()
+        st.agent_ids()
             .into_iter()
-            .filter(|inp| inp.agent_id != proposed.agent_id)
+            .filter(|id| id != &proposed.agent_id)
+            .filter_map(|id| st.heat_inputs_for(&id))
             .collect::<Vec<_>>()
     };
     others

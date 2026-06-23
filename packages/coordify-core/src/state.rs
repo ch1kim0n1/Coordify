@@ -115,31 +115,6 @@ impl State {
         self.agents.get(id).map(|a| (a.branch.clone(), a.last_seen_ms))
     }
 
-    /// Build HeatInputs for every agent that has a live claim, regardless of
-    /// whether the agent is still connected. Agent branch/last_seen come from the
-    /// agent record when present; otherwise they fall back to None/0.
-    pub fn live_claim_inputs_all(&self) -> Vec<HeatInputs> {
-        self.claims
-            .live_claims()
-            .map(|c| {
-                let (branch, last_seen_ms) = self
-                    .agents
-                    .get(&c.agent_id)
-                    .map(|a| (a.branch.clone(), a.last_seen_ms))
-                    .unwrap_or((None, 0));
-                HeatInputs {
-                    agent_id: c.agent_id.clone(),
-                    intent: c.intent.clone(),
-                    domains: c.domains.iter().cloned().collect(),
-                    files: c.estimated_files.iter().cloned().collect(),
-                    task_tokens: crate::heat::tokens(&c.task_summary),
-                    last_seen_ms,
-                    branch,
-                }
-            })
-            .collect()
-    }
-
     pub fn heat_inputs_for(&self, agent_id: &str) -> Option<HeatInputs> {
         let agent = self.agents.get(agent_id)?;
         let claim = self.claims.live_claim_for(agent_id)?;

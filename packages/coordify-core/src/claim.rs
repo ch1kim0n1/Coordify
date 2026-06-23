@@ -75,13 +75,6 @@ impl ClaimStore {
         })
     }
 
-    /// Iterate all live (Active/Provisional) claims.
-    pub fn live_claims(&self) -> impl Iterator<Item = &Claim> {
-        self.claims
-            .values()
-            .filter(|c| matches!(c.status, ClaimStatus::Active | ClaimStatus::Provisional))
-    }
-
     /// Mark a single claim RELEASED. Returns false if the claim does not exist
     /// or is not in a live state (Proposed/Provisional/Active).
     pub fn release(&mut self, claim_id: &str) -> bool {
