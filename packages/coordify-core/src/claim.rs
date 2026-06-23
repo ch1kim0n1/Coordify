@@ -75,17 +75,6 @@ impl ClaimStore {
         })
     }
 
-    /// Return the distinct agent IDs that own at least one live claim.
-    pub fn live_claim_agent_ids(&self) -> Vec<String> {
-        let mut ids: std::collections::HashSet<String> = std::collections::HashSet::new();
-        for c in self.claims.values() {
-            if matches!(c.status, ClaimStatus::Active | ClaimStatus::Provisional) {
-                ids.insert(c.agent_id.clone());
-            }
-        }
-        ids.into_iter().collect()
-    }
-
     /// Mark a single claim RELEASED. Returns false if the claim does not exist
     /// or is not in a live state (Proposed/Provisional/Active).
     pub fn release(&mut self, claim_id: &str) -> bool {

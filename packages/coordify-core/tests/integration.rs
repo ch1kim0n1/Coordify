@@ -509,7 +509,7 @@ fn overlapping_claims_emit_heat_updated() {
     );
     assert_eq!(send_line(&mut stream, &claim_b)["ok"], true);
 
-    drop(stream); // connection closed; session finalizes.
+    drop(stream); // connection closed.
 
     // events.log should contain HEAT_UPDATED for the A<->B pair.
     let sessions = core.root.join(".coordify/sessions");
