@@ -1,3 +1,4 @@
+use crate::cap::{self, CapErrorCode, CapEvent, ClaimStatus};
 use crate::eventlog::EventLog;
 use crate::ipc::{decode_request, encode_response, Request, Response};
 use crate::paths::Paths;
@@ -53,11 +54,102 @@ pub fn handle_request(shared: &Shared, req: &Request) -> Response {
                 None => Response::err(&req.id, "missing agent_id"),
             }
         }
-        "submit_event" => {
-            let _ = shared.log.lock().unwrap().append(&req.event);
+        "submit_event" => handle_cap_event(shared, req),
+        _ => Response::err(&req.id, "unknown action"),
+    }
+}
+
+fn cap_err(id: &str, code: CapErrorCode) -> Response {
+    Response::err(id, code.as_str())
+}
+
+fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
+    if req.cap_version.as_deref() != Some("0.1") {
+        return cap_err(&req.id, CapErrorCode::UnsupportedCapVersion);
+    }
+    let event = match cap::decode_event(&req.event) {
+        Ok(e) => e,
+        Err(code) => return cap_err(&req.id, code),
+    };
+    match event {
+        CapEvent::ClaimProposed {
+            agent_id,
+            intent,
+            domains,
+            estimated_files,
+            confidence,
+            ..
+        } => {
+            // Agent must exist.
+            {
+                let st = shared.state.lock().unwrap();
+                if st.agent_state(&agent_id).is_none() {
+                    return cap_err(&req.id, CapErrorCode::AgentNotFound);
+                }
+            }
+            let created = {
+                let mut st = shared.state.lock().unwrap();
+                st.claims.propose(
+                    &agent_id,
+                    intent.as_str().to_string(),
+                    domains,
+                    estimated_files,
+                    confidence,
+                )
+            };
+            match created {
+                Some(claim) => {
+                    if claim.status == ClaimStatus::Active {
+                        shared.state.lock().unwrap().promote_active(&agent_id);
+                    }
+                    let log_event = serde_json::json!({
+                        "type": "CLAIM_CREATED",
+                        "claimId": claim.claim_id,
+                        "agentId": agent_id,
+                        "status": claim.status.as_str(),
+                        "ts": crate::bootstrap::now_iso(),
+                    });
+                    let _ = shared.log.lock().unwrap().append(&log_event);
+                    Response::ok_with_data(
+                        &req.id,
+                        serde_json::json!({"claimId": claim.claim_id, "status": claim.status.as_str()}),
+                    )
+                }
+                None => {
+                    let log_event = serde_json::json!({
+                        "type": "CLAIM_REJECTED",
+                        "agentId": agent_id,
+                        "reason": "LOW_CONFIDENCE",
+                        "ts": crate::bootstrap::now_iso(),
+                    });
+                    let _ = shared.log.lock().unwrap().append(&log_event);
+                    Response::ok_with_data(
+                        &req.id,
+                        serde_json::json!({"status": "REJECTED", "reason": "LOW_CONFIDENCE"}),
+                    )
+                }
+            }
+        }
+        CapEvent::ClaimReleased { claim_id, agent_id, reason } => {
+            let released = {
+                let mut st = shared.state.lock().unwrap();
+                st.claims.release(&claim_id)
+            };
+            if !released {
+                return cap_err(&req.id, CapErrorCode::ClaimNotFound);
+            }
+            let log_event = serde_json::json!({
+                "type": "CLAIM_RELEASED",
+                "claimId": claim_id,
+                "agentId": agent_id,
+                "reason": serde_json::to_value(reason).unwrap(),
+                "ts": crate::bootstrap::now_iso(),
+            });
+            let _ = shared.log.lock().unwrap().append(&log_event);
             Response::ok_for(&req.id)
         }
-        _ => Response::err(&req.id, "unknown action"),
+        // Task 5 replaces this catch-all with AgentStateChanged + ClearInvoked.
+        _ => cap_err(&req.id, CapErrorCode::SchemaValidationFailed),
     }
 }
 
@@ -310,31 +402,84 @@ mod tests {
         assert_eq!(resp.error.as_deref(), Some("missing agent_id"));
     }
 
-    // Target A2: submit_event appends to the log and returns ok:true.
+    // Target A2: submit_event without cap_version returns UNSUPPORTED_CAP_VERSION (Task 4 routing).
     #[test]
     fn submit_event_appends_to_log() {
         let s = shared_for_test("good");
-        // First register so there is a real session context (not strictly required,
-        // but mirrors real usage).
-        let _reg = handle_request(&s, &req("good", "register"));
-
-        // Build a submit_event request.
+        // submit_event now routes through handle_cap_event; missing cap_version → error.
         let mut ev_req = req("good", "submit_event");
         ev_req.event = json!({"type": "CUSTOM", "x": 1});
         let resp = handle_request(&s, &ev_req);
-        assert!(resp.ok);
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_deref(), Some("UNSUPPORTED_CAP_VERSION"));
+    }
 
-        // Verify the event landed in the log file.
-        // The shared_for_test helper stores the log in a temp dir whose path is
-        // reconstructed from the counter that was already incremented.  Instead,
-        // read the log file via the EventLog::create path we know: the Shared
-        // struct's log field.  We cannot reach it after the fact, so we call
-        // append one more time on a *fresh* Shared built over the same dir — but
-        // the simplest verification is: the submit_event did not error AND a
-        // second submit works too (the file is open and writable).
-        let mut ev_req2 = req("good", "submit_event");
-        ev_req2.event = json!({"type": "CUSTOM", "x": 2});
-        let resp2 = handle_request(&s, &ev_req2);
-        assert!(resp2.ok);
+    fn cap_req(token: &str, event: serde_json::Value) -> Request {
+        Request {
+            id: "r1".to_string(),
+            token: token.to_string(),
+            action: "submit_event".to_string(),
+            agent_id: None,
+            meta: json!({}),
+            event,
+            cap_version: Some("0.1".to_string()),
+        }
+    }
+
+    #[test]
+    fn claim_proposed_active_creates_claim_and_activates_agent() {
+        let s = shared_for_test("good");
+        let reg = handle_request(&s, &req("good", "register"));
+        let agent = reg.agent_id.unwrap();
+        let resp = handle_request(
+            &s,
+            &cap_req("good", json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","confidence":0.9})),
+        );
+        assert!(resp.ok);
+        let data = resp.data.unwrap();
+        assert_eq!(data["status"], "ACTIVE");
+        assert!(data["claimId"].as_str().unwrap().starts_with("claim-"));
+        assert_eq!(s.state.lock().unwrap().agent_state(&agent), Some(crate::cap::AgentState::Active));
+    }
+
+    #[test]
+    fn claim_proposed_low_confidence_is_rejected() {
+        let s = shared_for_test("good");
+        let reg = handle_request(&s, &req("good", "register"));
+        let agent = reg.agent_id.unwrap();
+        let resp = handle_request(
+            &s,
+            &cap_req("good", json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","confidence":0.1})),
+        );
+        assert!(resp.ok);
+        assert_eq!(resp.data.unwrap()["status"], "REJECTED");
+        // Agent stays DISCOVERY.
+        assert_eq!(s.state.lock().unwrap().agent_state(&agent), Some(crate::cap::AgentState::Discovery));
+    }
+
+    #[test]
+    fn claim_proposed_unknown_agent_errors() {
+        let s = shared_for_test("good");
+        let resp = handle_request(
+            &s,
+            &cap_req("good", json!({"type":"CLAIM_PROPOSED","agentId":"agent-404","intent":"BUGFIX","confidence":0.9})),
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_deref(), Some("AGENT_NOT_FOUND"));
+    }
+
+    #[test]
+    fn bad_cap_version_and_unknown_event_and_release_missing() {
+        let s = shared_for_test("good");
+        // wrong cap version
+        let mut r = cap_req("good", json!({"type":"CLAIM_RELEASED","claimId":"claim-1","agentId":"a","reason":"TASK_COMPLETED"}));
+        r.cap_version = Some("9.9".to_string());
+        assert_eq!(handle_request(&s, &r).error.as_deref(), Some("UNSUPPORTED_CAP_VERSION"));
+        // unknown event type
+        let resp = handle_request(&s, &cap_req("good", json!({"type":"NONSENSE"})));
+        assert_eq!(resp.error.as_deref(), Some("SCHEMA_VALIDATION_FAILED"));
+        // release a claim that doesn't exist
+        let resp = handle_request(&s, &cap_req("good", json!({"type":"CLAIM_RELEASED","claimId":"claim-404","agentId":"a","reason":"TASK_COMPLETED"})));
+        assert_eq!(resp.error.as_deref(), Some("CLAIM_NOT_FOUND"));
     }
 }

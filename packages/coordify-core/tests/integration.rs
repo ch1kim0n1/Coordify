@@ -393,6 +393,32 @@ fn root_flag_without_value_exits_one() {
     );
 }
 
+#[test]
+fn claim_proposed_and_released_over_socket() {
+    let core = spawn_core("claim");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+
+    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
+    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+
+    let propose = format!(
+        r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","confidence":0.9}}}}"#,
+        token, agent
+    );
+    let resp = send_line(&mut stream, &propose);
+    assert_eq!(resp["ok"], true);
+    let claim_id = resp["data"]["claimId"].as_str().unwrap().to_string();
+    assert_eq!(resp["data"]["status"], "ACTIVE");
+
+    let release = format!(
+        r#"{{"id":"3","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_RELEASED","claimId":"{}","agentId":"{}","reason":"TASK_COMPLETED"}}}}"#,
+        token, claim_id, agent
+    );
+    assert_eq!(send_line(&mut stream, &release)["ok"], true);
+}
+
 // ---------------------------------------------------------------------------
 // Target E11: a file at <root>/.coordify/runtime prevents create_dir_all from
 // succeeding → acquire_lock errors → process exits 1.
