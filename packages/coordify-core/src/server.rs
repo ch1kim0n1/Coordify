@@ -100,8 +100,12 @@ fn handle_conn(shared: &Arc<Shared>, stream: UnixStream) -> bool {
 
     // Connection closed: the agent left.
     if let Some(id) = this_agent {
-        let mut st = shared.state.lock().unwrap();
-        if st.remove(&id) {
+        let (removed, empty) = {
+            let mut st = shared.state.lock().unwrap();
+            let removed = st.remove(&id);
+            (removed, st.agent_count() == 0)
+        };
+        if removed {
             let event = serde_json::json!({
                 "type": "AGENT_LEFT",
                 "agentId": id,
@@ -109,7 +113,7 @@ fn handle_conn(shared: &Arc<Shared>, stream: UnixStream) -> bool {
             });
             let _ = shared.log.lock().unwrap().append(&event);
         }
-        return st.agent_count() == 0;
+        return empty;
     }
     false
 }
@@ -139,9 +143,8 @@ pub fn run(
         // "last agent leaves -> finalize" decision is observed on this thread.
         // Phase 2 replaces this with a shared reaper-driven shutdown signal.
         if let Ok(network_empty) = handle.join() {
-            let had_agents = *shared.agents_seen.lock().unwrap() > 0;
-            if network_empty && had_agents {
-                let seen = *shared.agents_seen.lock().unwrap();
+            let seen = *shared.agents_seen.lock().unwrap();
+            if network_empty && seen > 0 {
                 finalize(&session, &paths, seen)?;
                 break;
             }
@@ -155,9 +158,12 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    static TEST_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
     fn shared_for_test(token: &str) -> Arc<Shared> {
         let mut dir = std::env::temp_dir();
-        dir.push(format!("coordify-srv-{}", std::process::id()));
+        dir.push(format!("coordify-srv-{}-{}", std::process::id(),
+            TEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let log = EventLog::create(dir.join("events.log")).unwrap();
