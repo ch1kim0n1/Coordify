@@ -2,7 +2,8 @@ use crate::cap::{self, CapErrorCode, CapEvent, ClaimStatus, ProposalKind};
 use crate::conflict::{compare, Conflict, ConflictConfig, ConflictState, ConflictStore, Decision};
 use crate::waitgraph::WaitGraph;
 use crate::eventlog::EventLog;
-use crate::heat::{self, HeatBand, HeatConfig, Knowledge};
+use crate::heat::{self, HeatBand, HeatConfig};
+use crate::knowledge::KnowledgeStore;
 use crate::heatstore::HeatStore;
 use crate::ipc::{decode_request, encode_response, Request, Response};
 use crate::paths::Paths;
@@ -21,7 +22,8 @@ pub struct Shared {
     pub finalized: AtomicBool,
     pub heat: Mutex<HeatStore>,
     pub heat_cfg: HeatConfig,
-    pub knowledge: Knowledge,
+    pub knowledge: Mutex<KnowledgeStore>,
+    pub knowledge_k: f64,
     pub conflicts: Mutex<ConflictStore>,
     pub conflict_cfg: ConflictConfig,
     pub waitgraph: Mutex<WaitGraph>,
@@ -90,6 +92,7 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
             confidence,
             ..
         } => {
+            let claim_files = estimated_files.clone();
             // Hoist task_summary so both predicted_heat and propose can use it.
             let task_summary = req
                 .event
@@ -171,6 +174,9 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                     });
                     let _ = shared.log.lock().unwrap().append(&event);
                     recompute_current_heat(shared, &agent_id);
+                    if claim_files.len() >= 2 {
+                        shared.knowledge.lock().unwrap().record_claim_files(&claim_files);
+                    }
                     Response::ok_with_data(
                         &req.id,
                         serde_json::json!({
@@ -346,6 +352,7 @@ struct PredictedEdge {
 
 /// Predicted heat of a proposed claim's inputs vs existing registered agents with live claims.
 fn predicted_heat(shared: &Shared, proposed: &heat::HeatInputs) -> Vec<PredictedEdge> {
+    let knowledge = shared.knowledge.lock().unwrap().snapshot(shared.knowledge_k);
     let others = {
         let st = shared.state.lock().unwrap();
         st.agent_ids()
@@ -357,7 +364,7 @@ fn predicted_heat(shared: &Shared, proposed: &heat::HeatInputs) -> Vec<Predicted
     others
         .iter()
         .map(|other| {
-            let r = heat::compute_heat(proposed, other, &shared.knowledge, &shared.heat_cfg);
+            let r = heat::compute_heat(proposed, other, &knowledge, &shared.heat_cfg);
             PredictedEdge {
                 pair: (proposed.agent_id.clone(), other.agent_id.clone()),
                 heat: r.heat,
@@ -417,10 +424,13 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
         }
     };
 
+    // Snapshot knowledge (scores) under a short lock for the pure compute.
+    let knowledge = shared.knowledge.lock().unwrap().snapshot(shared.knowledge_k);
+
     // Compute (pure). Keep each other's inputs for conflict metadata.
     let mut updates: Vec<(heat::HeatInputs, heat::HeatResult)> = Vec::new();
     for other in others {
-        let result = heat::compute_heat(&mine, &other, &shared.knowledge, &shared.heat_cfg);
+        let result = heat::compute_heat(&mine, &other, &knowledge, &shared.heat_cfg);
         updates.push((other, result));
     }
     {
@@ -431,6 +441,7 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
     }
     // Decide conflict open/resolve per edge (collect events to log after).
     let mut conflict_events: Vec<serde_json::Value> = Vec::new();
+    let mut accrue_paths: Vec<Vec<String>> = Vec::new();
     {
         let mut cstore = shared.conflicts.lock().unwrap();
         for (other, result) in &updates {
@@ -443,6 +454,7 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
                         mine.domains.union(&other.domains).cloned().collect();
                     let intents = vec![mine.intent.clone(), other.intent.clone()];
                     if let Some(c) = cstore.open(agent_id, other_id, result.heat, now_ms(), paths, domains, intents) {
+                        accrue_paths.push(c.paths.clone());
                         let ts = crate::bootstrap::now_iso();
                         conflict_events.push(serde_json::json!({
                             "type": "CONFLICT_OPENED",
@@ -468,6 +480,13 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
                     }));
                 }
             }
+        }
+    }
+    // Accrue knowledge from newly-opened conflicts (knowledge lock alone).
+    if !accrue_paths.is_empty() {
+        let mut k = shared.knowledge.lock().unwrap();
+        for paths in &accrue_paths {
+            k.record_conflict(paths);
         }
     }
     {
@@ -728,6 +747,12 @@ pub fn run(
         .unwrap_or(60_000);
     let conflict_cfg = ConflictConfig { proposal_timeout_ms, ..ConflictConfig::default() };
 
+    let knowledge_k = std::env::var("COORDIFY_KNOWLEDGE_K")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(5.0);
+    let (knowledge_store, quarantined) = KnowledgeStore::load(&paths.knowledge_dir());
+
     let shared = Arc::new(Shared {
         state: Mutex::new(State::new()),
         log: Mutex::new(log),
@@ -736,11 +761,20 @@ pub fn run(
         finalized: AtomicBool::new(false),
         heat: Mutex::new(HeatStore::new()),
         heat_cfg: HeatConfig::default(),
-        knowledge: Knowledge::default(),
+        knowledge: Mutex::new(knowledge_store),
+        knowledge_k,
         conflicts: Mutex::new(ConflictStore::new()),
         conflict_cfg,
         waitgraph: Mutex::new(WaitGraph::new()),
     });
+    for f in &quarantined {
+        let _ = shared.log.lock().unwrap().append(&serde_json::json!({
+            "type": "KNOWLEDGE_QUARANTINED",
+            "file": f,
+            "reason": "PARSE_FAILED",
+            "ts": crate::bootstrap::now_iso(),
+        }));
+    }
     let _reaper = spawn_reaper(
         Arc::clone(&shared),
         session.clone(),
@@ -875,7 +909,8 @@ mod tests {
             finalized: AtomicBool::new(false),
             heat: Mutex::new(HeatStore::new()),
             heat_cfg: HeatConfig::default(),
-            knowledge: Knowledge::default(),
+            knowledge: Mutex::new(KnowledgeStore::new()),
+            knowledge_k: 5.0,
             conflicts: Mutex::new(ConflictStore::new()),
             conflict_cfg: ConflictConfig::default(),
             waitgraph: Mutex::new(WaitGraph::new()),
@@ -1239,6 +1274,18 @@ mod tests {
             cs.get_by_id(&id).unwrap().state,
             crate::conflict::ConflictState::AwaitingUserDecision
         );
+    }
+
+    #[test]
+    fn conflict_open_accrues_hotzone_and_feeds_live_heat() {
+        let s = shared_for_test("good");
+        let (_a, _b, _id) = open_conflict_between_two(&s);
+        // The conflict opened on src/auth/session.ts -> hotzone count >= 1.
+        let count = s.knowledge.lock().unwrap().hotzone_count("src/auth/session.ts");
+        assert!(count >= 1, "expected hotzone accrual, got {count}");
+        // A snapshot now scores that file > 0, so live heat would include it.
+        let k = s.knowledge.lock().unwrap().snapshot(s.knowledge_k);
+        assert!(k.hotzone_risk("src/auth/session.ts") > 0.0, "hotzone risk should be live");
     }
 
     #[test]
