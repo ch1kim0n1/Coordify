@@ -1,6 +1,7 @@
 pub mod paths;
 pub mod ipc;
 pub mod cap;
+pub mod claim;
 pub mod bootstrap;
 pub mod eventlog;
 pub mod state;
