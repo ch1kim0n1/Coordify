@@ -275,6 +275,9 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
             recompute_current_heat(shared, &agent_id);
             Response::ok_with_data(&req.id, serde_json::json!({"generation": generation}))
         }
+        CapEvent::ConflictProposalSubmitted { .. } | CapEvent::ConflictUserDecision { .. } => {
+            cap_err(&req.id, CapErrorCode::SchemaValidationFailed)
+        }
     }
 }
 
