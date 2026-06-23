@@ -57,6 +57,54 @@ impl Intent {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum ProposalKind {
+    CoOwn,
+    SplitScope,
+    YieldClaim,
+    TransferTask,
+    QueueTask,
+    AskUser,
+    AbortTask,
+}
+
+impl ProposalKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            ProposalKind::CoOwn => "CO_OWN",
+            ProposalKind::SplitScope => "SPLIT_SCOPE",
+            ProposalKind::YieldClaim => "YIELD_CLAIM",
+            ProposalKind::TransferTask => "TRANSFER_TASK",
+            ProposalKind::QueueTask => "QUEUE_TASK",
+            ProposalKind::AskUser => "ASK_USER",
+            ProposalKind::AbortTask => "ABORT_TASK",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClaimChange {
+    pub agent_id: String,
+    #[serde(default)]
+    pub keep: Option<Vec<String>>,
+    #[serde(default)]
+    pub take: Option<Vec<String>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Proposal {
+    pub kind: ProposalKind,
+    #[serde(default)]
+    pub summary: String,
+    #[serde(default)]
+    pub claim_changes: Vec<ClaimChange>,
+    #[serde(default)]
+    pub requires_user_approval: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ClaimStatus {
     Proposed,
     Provisional,
@@ -101,6 +149,7 @@ pub enum CapErrorCode {
     ClaimConflict,
     AgentNotFound,
     ClaimNotFound,
+    ConflictNotFound,
     CoreDegraded,
     Timeout,
     UnsupportedCapVersion,
@@ -115,6 +164,7 @@ impl CapErrorCode {
             CapErrorCode::ClaimConflict => "CLAIM_CONFLICT",
             CapErrorCode::AgentNotFound => "AGENT_NOT_FOUND",
             CapErrorCode::ClaimNotFound => "CLAIM_NOT_FOUND",
+            CapErrorCode::ConflictNotFound => "CONFLICT_NOT_FOUND",
             CapErrorCode::CoreDegraded => "CORE_DEGRADED",
             CapErrorCode::Timeout => "TIMEOUT",
             CapErrorCode::UnsupportedCapVersion => "UNSUPPORTED_CAP_VERSION",
@@ -152,6 +202,17 @@ pub enum CapEvent {
     #[serde(rename_all = "camelCase")]
     ClearInvoked {
         agent_id: String,
+    },
+    #[serde(rename_all = "camelCase")]
+    ConflictProposalSubmitted {
+        conflict_id: String,
+        from: String,
+        proposal: Proposal,
+    },
+    #[serde(rename_all = "camelCase")]
+    ConflictUserDecision {
+        conflict_id: String,
+        choice: String,
     },
 }
 
@@ -267,5 +328,82 @@ mod tests {
         for (v, s) in cases {
             assert_eq!(v.as_str(), s);
         }
+    }
+
+    #[test]
+    fn decodes_conflict_proposal_all_kinds() {
+        use ProposalKind::*;
+        let cases = [
+            ("CO_OWN", CoOwn), ("SPLIT_SCOPE", SplitScope), ("YIELD_CLAIM", YieldClaim),
+            ("TRANSFER_TASK", TransferTask), ("QUEUE_TASK", QueueTask),
+            ("ASK_USER", AskUser), ("ABORT_TASK", AbortTask),
+        ];
+        for (s, k) in cases {
+            let ev = json!({
+                "type": "CONFLICT_PROPOSAL_SUBMITTED",
+                "conflictId": "conflict-1",
+                "from": "agent-1",
+                "proposal": {
+                    "kind": s,
+                    "summary": "do the thing",
+                    "claimChanges": [{"agentId":"agent-1","keep":["src/a.rs"]}],
+                    "requiresUserApproval": false
+                }
+            });
+            match decode_event(&ev).unwrap() {
+                CapEvent::ConflictProposalSubmitted { conflict_id, from, proposal } => {
+                    assert_eq!(conflict_id, "conflict-1");
+                    assert_eq!(from, "agent-1");
+                    assert_eq!(proposal.kind, k);
+                    assert_eq!(proposal.summary, "do the thing");
+                    assert_eq!(proposal.claim_changes[0].agent_id, "agent-1");
+                    assert_eq!(proposal.claim_changes[0].keep.as_ref().unwrap(), &vec!["src/a.rs".to_string()]);
+                    assert!(!proposal.requires_user_approval);
+                }
+                other => panic!("wrong variant: {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn proposal_defaults_optional_fields() {
+        let ev = json!({
+            "type":"CONFLICT_PROPOSAL_SUBMITTED","conflictId":"c1","from":"a1",
+            "proposal":{"kind":"CO_OWN"}
+        });
+        match decode_event(&ev).unwrap() {
+            CapEvent::ConflictProposalSubmitted { proposal, .. } => {
+                assert_eq!(proposal.summary, "");
+                assert!(proposal.claim_changes.is_empty());
+                assert!(!proposal.requires_user_approval);
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn decodes_conflict_user_decision() {
+        let ev = json!({"type":"CONFLICT_USER_DECISION","conflictId":"c1","choice":"option-2"});
+        match decode_event(&ev).unwrap() {
+            CapEvent::ConflictUserDecision { conflict_id, choice } => {
+                assert_eq!(conflict_id, "c1");
+                assert_eq!(choice, "option-2");
+            }
+            other => panic!("wrong variant: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_bad_proposal_kind() {
+        let ev = json!({"type":"CONFLICT_PROPOSAL_SUBMITTED","conflictId":"c1","from":"a1","proposal":{"kind":"NOPE"}});
+        assert_eq!(decode_event(&ev).unwrap_err(), CapErrorCode::SchemaValidationFailed);
+    }
+
+    #[test]
+    fn proposal_kind_as_str_and_conflict_not_found() {
+        assert_eq!(ProposalKind::SplitScope.as_str(), "SPLIT_SCOPE");
+        assert_eq!(ProposalKind::QueueTask.as_str(), "QUEUE_TASK");
+        assert_eq!(serde_json::to_value(ProposalKind::CoOwn).unwrap(), json!("CO_OWN"));
+        assert_eq!(CapErrorCode::ConflictNotFound.as_str(), "CONFLICT_NOT_FOUND");
     }
 }
