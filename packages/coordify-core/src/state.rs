@@ -291,4 +291,11 @@ mod tests {
         assert!(inp.task_tokens.contains("fix"));
         assert!(inp.files.contains("a.rs"));
     }
+
+    #[test]
+    fn can_transition_same_state_is_noop_allowed() {
+        use crate::cap::AgentState::*;
+        assert!(super::can_transition(Active, Active));
+        assert!(super::can_transition(Discovery, Discovery));
+    }
 }

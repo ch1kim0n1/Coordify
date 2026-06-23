@@ -321,4 +321,19 @@ mod tests {
         assert_eq!(r.heat, 45);
         assert_eq!(r.components.historical_hotzone_risk, 1.0);
     }
+
+    #[test]
+    fn heat_band_as_str_and_recommendation_all() {
+        use HeatBand::*;
+        let cases = [
+            (Safe, "SAFE", "PROCEED"),
+            (Monitor, "MONITOR", "MONITOR"),
+            (Overlap, "OVERLAP", "SPLIT_SCOPE_OR_SEQUENCE"),
+            (ConflictCandidate, "CONFLICT_CANDIDATE", "NEGOTIATE_BEFORE_CLAIM"),
+        ];
+        for (b, s, rec) in cases {
+            assert_eq!(b.as_str(), s);
+            assert_eq!(b.recommendation(), rec);
+        }
+    }
 }

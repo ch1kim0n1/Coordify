@@ -88,4 +88,12 @@ mod tests {
         assert_eq!(s.len(), 1);
         assert!(s.get("agent-2", "agent-3").is_some());
     }
+
+    #[test]
+    fn is_empty_reflects_contents() {
+        let mut s = HeatStore::new();
+        assert!(s.is_empty());
+        s.upsert("agent-1", "agent-2", dummy(10));
+        assert!(!s.is_empty());
+    }
 }

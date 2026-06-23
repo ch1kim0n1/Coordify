@@ -233,4 +233,12 @@ mod tests {
         assert_eq!(swept, vec![c.claim_id.clone()]);
         assert_eq!(s.get(&c.claim_id).unwrap().status, ClaimStatus::Reclaimable);
     }
+
+    #[test]
+    fn is_empty_reflects_contents() {
+        let mut s = ClaimStore::new();
+        assert!(s.is_empty());
+        s.propose("agent-1", "t".into(), "BUGFIX".into(), vec![], vec![], 0.9);
+        assert!(!s.is_empty());
+    }
 }

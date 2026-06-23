@@ -823,4 +823,29 @@ mod tests {
         let resp = handle_request(&s, &cap_req("good", json!({"type":"CLAIM_RELEASED","claimId":"claim-404","agentId":"a","reason":"TASK_COMPLETED"})));
         assert_eq!(resp.error.as_deref(), Some("CLAIM_NOT_FOUND"));
     }
+
+    #[test]
+    fn low_overlap_emits_no_threshold_and_release_drops_edge() {
+        let s = shared_for_test("good");
+        let a = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        let b = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        // Disjoint claims -> low heat (different intent/files/domains), edge exists but band is low.
+        let ca = json!({"type":"CLAIM_PROPOSED","agentId":a,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/a.rs"],"task":{"summary":"alpha"},"confidence":0.9});
+        let cb = json!({"type":"CLAIM_PROPOSED","agentId":b,"intent":"DOCUMENTATION","domains":["DOCS"],"estimatedFiles":["docs/b.md"],"task":{"summary":"beta"},"confidence":0.9});
+        assert!(handle_request(&s, &cap_req("good", ca)).ok);
+        let cb_resp = handle_request(&s, &cap_req("good", cb));
+        assert!(cb_resp.ok);
+        let cb_id = cb_resp.data.unwrap()["claimId"].as_str().unwrap().to_string();
+        // Edge exists (current heat computed) and is below the conflict band.
+        {
+            let store = s.heat.lock().unwrap();
+            let edge = store.get(&a, &b).expect("edge should exist");
+            assert!(edge.heat <= 50, "expected low heat, got {}", edge.heat);
+        }
+        // Release b's claim -> b has no live claim -> its heat edges are dropped.
+        let release = json!({"type":"CLAIM_RELEASED","claimId":cb_id,"agentId":b,"reason":"TASK_COMPLETED"});
+        assert!(handle_request(&s, &cap_req("good", release)).ok);
+        let store = s.heat.lock().unwrap();
+        assert!(store.get(&a, &b).is_none(), "edge should be dropped after release");
+    }
 }
