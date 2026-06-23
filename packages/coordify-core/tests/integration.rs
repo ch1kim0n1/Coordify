@@ -55,6 +55,20 @@ fn spawn_core(tag: &str) -> Spawned {
     Spawned { child, root }
 }
 
+fn spawn_core_fast_reaper(tag: &str) -> Spawned {
+    let root = temp_root(tag);
+    let child = Command::new(env!("CARGO_BIN_EXE_coordify-core"))
+        .arg("--root")
+        .arg(&root)
+        .env("COORDIFY_REAPER_INTERVAL_MS", "100")
+        .env("COORDIFY_REAPER_TIMEOUT_MS", "300")
+        .spawn()
+        .expect("failed to spawn coordify-core");
+    let sock = root.join(".coordify/runtime/core.sock");
+    assert!(wait_for(&sock, Duration::from_secs(5)), "socket never appeared");
+    Spawned { child, root }
+}
+
 fn send_line(stream: &mut UnixStream, line: &str) -> serde_json::Value {
     stream.write_all(line.as_bytes()).unwrap();
     stream.write_all(b"\n").unwrap();
@@ -136,4 +150,41 @@ fn last_agent_leaving_finalizes_session() {
     assert!(found, "session was not finalized after last agent left");
     // Lock should be gone after finalize.
     assert!(!core.root.join(".coordify/runtime/core.lock").exists());
+}
+
+#[test]
+fn reaper_logs_agent_lost_for_silent_agent() {
+    let core = spawn_core_fast_reaper("reap");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+
+    // Register, then keep the connection OPEN but send no heartbeats so the
+    // reaper times the agent out while it is still "connected".
+    let mut stream = UnixStream::connect(&sock).unwrap();
+    let reg = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
+        token
+    );
+    let resp = send_line(&mut stream, &reg);
+    assert_eq!(resp["ok"], true);
+
+    // Wait past the 300ms timeout + a reaper tick.
+    std::thread::sleep(Duration::from_millis(700));
+
+    // Find the events.log and assert AGENT_LOST + CLAIM_ORPHANED are present.
+    let sessions = core.root.join(".coordify/sessions");
+    let mut log_contents = String::new();
+    if let Ok(entries) = std::fs::read_dir(&sessions) {
+        for e in entries.flatten() {
+            let log = e.path().join("events.log");
+            if log.exists() {
+                log_contents = std::fs::read_to_string(log).unwrap();
+            }
+        }
+    }
+    assert!(log_contents.contains("AGENT_LOST"), "no AGENT_LOST event logged");
+    assert!(log_contents.contains("CLAIM_ORPHANED"), "no CLAIM_ORPHANED event logged");
+
+    // Keep the stream alive until assertions are done.
+    drop(stream);
 }

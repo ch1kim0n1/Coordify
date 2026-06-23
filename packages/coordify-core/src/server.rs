@@ -132,6 +132,16 @@ pub fn run(
         agents_seen: Mutex::new(0),
     });
 
+    let interval_ms = std::env::var("COORDIFY_REAPER_INTERVAL_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(2_000);
+    let timeout_ms = std::env::var("COORDIFY_REAPER_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(10_000);
+    let _reaper = spawn_reaper(Arc::clone(&shared), interval_ms, timeout_ms);
+
     for conn in listener.incoming() {
         let stream = match conn {
             Ok(s) => s,
@@ -151,6 +161,33 @@ pub fn run(
         }
     }
     Ok(())
+}
+
+pub fn spawn_reaper(
+    shared: Arc<Shared>,
+    interval_ms: u64,
+    timeout_ms: u64,
+) -> std::thread::JoinHandle<()> {
+    std::thread::spawn(move || loop {
+        std::thread::sleep(std::time::Duration::from_millis(interval_ms));
+        let lost = {
+            let mut st = shared.state.lock().unwrap();
+            st.reap(now_ms(), timeout_ms)
+        };
+        for id in lost {
+            let mut log = shared.log.lock().unwrap();
+            let _ = log.append(&serde_json::json!({
+                "type": "AGENT_LOST",
+                "agentId": id,
+                "ts": crate::bootstrap::now_iso(),
+            }));
+            let _ = log.append(&serde_json::json!({
+                "type": "CLAIM_ORPHANED",
+                "agentId": id,
+                "ts": crate::bootstrap::now_iso(),
+            }));
+        }
+    })
 }
 
 #[cfg(test)]
@@ -216,5 +253,20 @@ mod tests {
         let s = shared_for_test("good");
         let resp = handle_request(&s, &req("good", "frobnicate"));
         assert_eq!(resp.error.as_deref(), Some("unknown action"));
+    }
+
+    #[test]
+    fn reaper_emits_lost_and_orphaned_events() {
+        let s = shared_for_test("good");
+        // Register an agent, then backdate it by mutating via a stale heartbeat.
+        let resp = handle_request(&s, &req("good", "register"));
+        let id = resp.agent_id.unwrap();
+        // Force it stale: heartbeat with an old timestamp is not exposed, so
+        // reap directly with a now far past the timeout window.
+        let lost = s.state.lock().unwrap().reap(now_ms() + 1_000_000, 10_000);
+        assert_eq!(lost, vec![id]);
+        // The reaper loop body's event-append is exercised by the integration test;
+        // here we assert reap removed the agent.
+        assert_eq!(s.state.lock().unwrap().agent_count(), 0);
     }
 }
