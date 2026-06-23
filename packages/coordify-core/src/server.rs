@@ -385,7 +385,7 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
                     let domains: Vec<String> =
                         mine.domains.union(&other.domains).cloned().collect();
                     let intents = vec![mine.intent.clone(), other.intent.clone()];
-                    if let Some(c) = cstore.open(agent_id, other_id, result.heat, paths, domains, intents) {
+                    if let Some(c) = cstore.open(agent_id, other_id, result.heat, now_ms(), paths, domains, intents) {
                         let ts = crate::bootstrap::now_iso();
                         conflict_events.push(serde_json::json!({
                             "type": "CONFLICT_OPENED",
