@@ -1,5 +1,6 @@
-use crate::cap::{self, CapErrorCode, CapEvent, ClaimStatus};
-use crate::conflict::ConflictStore;
+use crate::cap::{self, CapErrorCode, CapEvent, ClaimStatus, ProposalKind};
+use crate::conflict::{compare, Conflict, ConflictConfig, ConflictState, ConflictStore, Decision};
+use crate::waitgraph::WaitGraph;
 use crate::eventlog::EventLog;
 use crate::heat::{self, HeatBand, HeatConfig, Knowledge};
 use crate::heatstore::HeatStore;
@@ -22,6 +23,8 @@ pub struct Shared {
     pub heat_cfg: HeatConfig,
     pub knowledge: Knowledge,
     pub conflicts: Mutex<ConflictStore>,
+    pub conflict_cfg: ConflictConfig,
+    pub waitgraph: Mutex<WaitGraph>,
 }
 
 pub fn handle_request(shared: &Shared, req: &Request) -> Response {
@@ -275,8 +278,61 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
             recompute_current_heat(shared, &agent_id);
             Response::ok_with_data(&req.id, serde_json::json!({"generation": generation}))
         }
-        CapEvent::ConflictProposalSubmitted { .. } | CapEvent::ConflictUserDecision { .. } => {
-            cap_err(&req.id, CapErrorCode::SchemaValidationFailed)
+        CapEvent::ConflictProposalSubmitted { conflict_id, from, proposal } => {
+            let recorded = {
+                let mut cs = shared.conflicts.lock().unwrap();
+                cs.record_proposal(&conflict_id, &from, proposal.clone())
+            };
+            if !recorded {
+                return cap_err(&req.id, CapErrorCode::ConflictNotFound);
+            }
+            {
+                let _ = shared.log.lock().unwrap().append(&serde_json::json!({
+                    "type": "CONFLICT_PROPOSAL_RECEIVED",
+                    "conflictId": conflict_id,
+                    "from": from,
+                    "kind": proposal.kind.as_str(),
+                    "summary": proposal.summary,
+                    "ts": crate::bootstrap::now_iso(),
+                }));
+            }
+            // When both have proposed, decide synchronously on a snapshot.
+            let snapshot = {
+                let cs = shared.conflicts.lock().unwrap();
+                if cs.both_proposed(&conflict_id) {
+                    cs.get_by_id(&conflict_id).cloned()
+                } else {
+                    None
+                }
+            };
+            if let Some(c) = snapshot {
+                finalize_negotiation(shared, &c);
+            }
+            Response::ok_for(&req.id)
+        }
+        CapEvent::ConflictUserDecision { conflict_id, choice } => {
+            let resolved = {
+                let mut cs = shared.conflicts.lock().unwrap();
+                cs.resolve_by_id(&conflict_id)
+            };
+            match resolved {
+                None => cap_err(&req.id, CapErrorCode::ConflictNotFound),
+                Some(c) => {
+                    {
+                        let mut wg = shared.waitgraph.lock().unwrap();
+                        wg.remove_agent(&c.agents.0);
+                        wg.remove_agent(&c.agents.1);
+                    }
+                    let _ = shared.log.lock().unwrap().append(&serde_json::json!({
+                        "type": "CONFLICT_RESOLVED",
+                        "conflictId": c.conflict_id,
+                        "resolution": "USER_ARBITRATED",
+                        "choice": choice,
+                        "ts": crate::bootstrap::now_iso(),
+                    }));
+                    Response::ok_for(&req.id)
+                }
+            }
         }
     }
 }
@@ -444,6 +500,119 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
     }
 }
 
+/// Build the identical arbitration prompt shown to both agents (§18.5).
+fn build_arbitration(c: &Conflict) -> serde_json::Value {
+    let options: Vec<serde_json::Value> = c
+        .proposals_sorted()
+        .iter()
+        .enumerate()
+        .map(|(i, (agent, p))| {
+            serde_json::json!({
+                "id": format!("option-{}", i + 1),
+                "from": agent,
+                "summary": p.summary,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "type": "USER_ARBITRATION_REQUIRED",
+        "conflictId": c.conflict_id,
+        "agents": [c.agents.0, c.agents.1],
+        "prompt": "Coordify requires a user decision.",
+        "options": options,
+        "ts": crate::bootstrap::now_iso(),
+    })
+}
+
+/// Move a conflict to AWAITING_USER_DECISION and emit escalation + arbitration
+/// (plus a DEADLOCK_DETECTED record when caused by a wait cycle).
+fn escalate_conflict(
+    shared: &Shared,
+    c: &Conflict,
+    reason: &str,
+    deadlock_edges: Option<Vec<crate::waitgraph::WaitEdge>>,
+) {
+    shared
+        .conflicts
+        .lock()
+        .unwrap()
+        .set_state(&c.conflict_id, ConflictState::AwaitingUserDecision);
+    let mut log = shared.log.lock().unwrap();
+    if let Some(edges) = deadlock_edges {
+        let _ = log.append(&serde_json::json!({
+            "type": "DEADLOCK_DETECTED",
+            "agents": [c.agents.0, c.agents.1],
+            "waitEdges": edges,
+            "requiredAction": "USER_ARBITRATION",
+            "ts": crate::bootstrap::now_iso(),
+        }));
+    }
+    let _ = log.append(&serde_json::json!({
+        "type": "CONFLICT_ESCALATED",
+        "conflictId": c.conflict_id,
+        "reason": reason,
+        "ts": crate::bootstrap::now_iso(),
+    }));
+    let _ = log.append(&build_arbitration(c));
+}
+
+/// Both participants have proposed: add wait edges for queue proposals, detect
+/// deadlock, otherwise compare and auto-resolve or escalate.
+fn finalize_negotiation(shared: &Shared, c: &Conflict) {
+    let a = &c.agents.0;
+    let b = &c.agents.1;
+    let pa = match c.proposals.get(a) {
+        Some(p) => p,
+        None => return,
+    };
+    let pb = match c.proposals.get(b) {
+        Some(p) => p,
+        None => return,
+    };
+    let resource = c.paths.join(",");
+    let both_queue = pa.kind == ProposalKind::QueueTask && pb.kind == ProposalKind::QueueTask;
+    let deadlock_edges = {
+        let mut wg = shared.waitgraph.lock().unwrap();
+        if pa.kind == ProposalKind::QueueTask {
+            wg.add_edge(a, b, &resource);
+        }
+        if pb.kind == ProposalKind::QueueTask {
+            wg.add_edge(b, a, &resource);
+        }
+        if both_queue {
+            wg.find_cycle()
+        } else {
+            None
+        }
+    };
+    if let Some(edges) = deadlock_edges {
+        escalate_conflict(shared, c, "DEADLOCK", Some(edges));
+        return;
+    }
+    match compare(pa, pb, &c.paths, &shared.conflict_cfg) {
+        Decision::AutoResolve { resolution } => {
+            let resolved = {
+                let mut cs = shared.conflicts.lock().unwrap();
+                cs.resolve_by_id(&c.conflict_id)
+            };
+            if resolved.is_some() {
+                {
+                    let mut wg = shared.waitgraph.lock().unwrap();
+                    wg.remove_agent(a);
+                    wg.remove_agent(b);
+                }
+                let _ = shared.log.lock().unwrap().append(&serde_json::json!({
+                    "type": "CONFLICT_RESOLVED",
+                    "conflictId": c.conflict_id,
+                    "resolution": resolution,
+                    "ts": crate::bootstrap::now_iso(),
+                }));
+            }
+        }
+        Decision::Escalate { reason } => escalate_conflict(shared, c, reason, None),
+    }
+}
+
 /// Handle one connection: read newline-delimited requests, reply per line.
 /// When the connecting agent registered, drop it on disconnect and return
 /// whether the network is now empty.
@@ -510,17 +679,6 @@ pub fn run(
     listener: UnixListener,
 ) -> std::io::Result<()> {
     let log = EventLog::create(session.dir.join("events.log"))?;
-    let shared = Arc::new(Shared {
-        state: Mutex::new(State::new()),
-        log: Mutex::new(log),
-        token,
-        agents_seen: Mutex::new(0),
-        finalized: AtomicBool::new(false),
-        heat: Mutex::new(HeatStore::new()),
-        heat_cfg: HeatConfig::default(),
-        knowledge: Knowledge::default(),
-        conflicts: Mutex::new(ConflictStore::new()),
-    });
 
     let interval_ms = std::env::var("COORDIFY_REAPER_INTERVAL_MS")
         .ok()
@@ -534,6 +692,25 @@ pub fn run(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(300_000);
+    let proposal_timeout_ms = std::env::var("COORDIFY_PROPOSAL_TIMEOUT_MS")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(60_000);
+    let conflict_cfg = ConflictConfig { proposal_timeout_ms, ..ConflictConfig::default() };
+
+    let shared = Arc::new(Shared {
+        state: Mutex::new(State::new()),
+        log: Mutex::new(log),
+        token,
+        agents_seen: Mutex::new(0),
+        finalized: AtomicBool::new(false),
+        heat: Mutex::new(HeatStore::new()),
+        heat_cfg: HeatConfig::default(),
+        knowledge: Knowledge::default(),
+        conflicts: Mutex::new(ConflictStore::new()),
+        conflict_cfg,
+        waitgraph: Mutex::new(WaitGraph::new()),
+    });
     let _reaper = spawn_reaper(
         Arc::clone(&shared),
         session.clone(),
@@ -668,6 +845,8 @@ mod tests {
             heat_cfg: HeatConfig::default(),
             knowledge: Knowledge::default(),
             conflicts: Mutex::new(ConflictStore::new()),
+            conflict_cfg: ConflictConfig::default(),
+            waitgraph: Mutex::new(WaitGraph::new()),
         })
     }
 
@@ -928,6 +1107,65 @@ mod tests {
         assert!(handle_request(&s, &cap_req("good", ca)).ok);
         assert!(handle_request(&s, &cap_req("good", cb)).ok);
         assert_eq!(s.conflicts.lock().unwrap().open_count(), 0);
+    }
+
+    fn open_conflict_between_two(s: &Arc<Shared>) -> (String, String, String) {
+        let a = handle_request(s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let b = handle_request(s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let mk = |agent: &str| json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{"summary":"fix session expiry"},"confidence":0.9});
+        assert!(handle_request(s, &cap_req("good", mk(&a))).ok);
+        assert!(handle_request(s, &cap_req("good", mk(&b))).ok);
+        let id = s.conflicts.lock().unwrap().get_by_id("conflict-1").map(|c| c.conflict_id.clone())
+            .or_else(|| { let cs = s.conflicts.lock().unwrap(); cs.has_open(&a, &b).then(|| "conflict-1".to_string()) })
+            .expect("a conflict should be open");
+        (a, b, id)
+    }
+
+    fn proposal_ev(conflict_id: &str, from: &str, kind: &str) -> serde_json::Value {
+        json!({"type":"CONFLICT_PROPOSAL_SUBMITTED","conflictId":conflict_id,"from":from,
+               "proposal":{"kind":kind,"summary":format!("{from} proposes {kind}"),"claimChanges":[],"requiresUserApproval":false}})
+    }
+
+    #[test]
+    fn both_compatible_proposals_resolve_conflict() {
+        let s = shared_for_test("good");
+        let (a, b, id) = open_conflict_between_two(&s);
+        assert_eq!(s.conflicts.lock().unwrap().open_count(), 1);
+        assert!(handle_request(&s, &cap_req("good", proposal_ev(&id, &a, "YIELD_CLAIM"))).ok);
+        assert!(handle_request(&s, &cap_req("good", proposal_ev(&id, &b, "CO_OWN"))).ok);
+        // YIELD by one -> auto-resolved -> removed.
+        assert_eq!(s.conflicts.lock().unwrap().open_count(), 0);
+    }
+
+    #[test]
+    fn incompatible_proposals_escalate_to_user() {
+        let s = shared_for_test("good");
+        let (a, b, id) = open_conflict_between_two(&s);
+        assert!(handle_request(&s, &cap_req("good", proposal_ev(&id, &a, "CO_OWN"))).ok);
+        assert!(handle_request(&s, &cap_req("good", proposal_ev(&id, &b, "SPLIT_SCOPE"))).ok);
+        // Mixed -> escalate. Conflict stays open, AwaitingUserDecision.
+        let cs = s.conflicts.lock().unwrap();
+        assert_eq!(cs.open_count(), 1);
+        assert_eq!(cs.get_by_id(&id).unwrap().state, crate::conflict::ConflictState::AwaitingUserDecision);
+    }
+
+    #[test]
+    fn mutual_queue_is_deadlock_and_escalates() {
+        let s = shared_for_test("good");
+        let (a, b, id) = open_conflict_between_two(&s);
+        assert!(handle_request(&s, &cap_req("good", proposal_ev(&id, &a, "QUEUE_TASK"))).ok);
+        assert!(handle_request(&s, &cap_req("good", proposal_ev(&id, &b, "QUEUE_TASK"))).ok);
+        let cs = s.conflicts.lock().unwrap();
+        assert_eq!(cs.get_by_id(&id).unwrap().state, crate::conflict::ConflictState::AwaitingUserDecision);
+    }
+
+    #[test]
+    fn proposal_for_unknown_conflict_errors() {
+        let s = shared_for_test("good");
+        let (a, _b, _id) = open_conflict_between_two(&s);
+        let resp = handle_request(&s, &cap_req("good", proposal_ev("conflict-999", &a, "CO_OWN")));
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_deref(), Some("CONFLICT_NOT_FOUND"));
     }
 
     #[test]
