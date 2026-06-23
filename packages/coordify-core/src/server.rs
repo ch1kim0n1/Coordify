@@ -633,6 +633,22 @@ fn finalize_negotiation(shared: &Shared, c: &Conflict) {
     }
 }
 
+/// Atomically persist the knowledge counts to the project's knowledge dir.
+/// Best-effort: a write failure is swallowed (finalize must not be blocked).
+fn persist_knowledge(shared: &Shared, paths: &Paths) {
+    let result = {
+        let store = shared.knowledge.lock().unwrap();
+        store.save_atomic(&paths.knowledge_dir())
+    };
+    if let Err(e) = result {
+        let _ = shared.log.lock().unwrap().append(&serde_json::json!({
+            "type": "KNOWLEDGE_PERSIST_FAILED",
+            "error": e.to_string(),
+            "ts": crate::bootstrap::now_iso(),
+        }));
+    }
+}
+
 /// Proposal-timeout sweep (§18.6): escalate conflicts that aged out without
 /// both proposals. Snapshot under a short conflict lock, then log — never
 /// nested. Called each reaper tick with the reaper's captured `now`.
@@ -799,6 +815,7 @@ pub fn run(
             if network_empty && seen > 0
                 && shared.finalized.compare_exchange(false, true, SeqCst, SeqCst).is_ok()
             {
+                persist_knowledge(&shared, &paths);
                 finalize(&session, &paths, seen)?;
                 break;
             } else if network_empty && seen > 0 {
@@ -881,6 +898,7 @@ pub fn spawn_reaper(
             && seen > 0
             && shared.finalized.compare_exchange(false, true, SeqCst, SeqCst).is_ok()
         {
+            persist_knowledge(&shared, &paths);
             let _ = finalize(&session, &paths, seen);
             std::process::exit(0);
         }
