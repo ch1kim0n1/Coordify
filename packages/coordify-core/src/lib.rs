@@ -11,3 +11,4 @@ pub mod state;
 pub mod session;
 pub mod server;
 pub mod waitgraph;
+pub mod knowledge;

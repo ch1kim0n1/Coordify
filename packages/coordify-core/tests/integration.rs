@@ -773,6 +773,47 @@ fn negotiation_resolves_conflict_over_socket() {
 }
 
 #[test]
+fn knowledge_files_written_after_conflict_session() {
+    // Use fast reaper so the orphaned first-registered agent times out quickly
+    // after the connection closes, leaving the network empty and triggering finalize.
+    let core = spawn_core_fast_reaper("know");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+
+    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
+    let reg_b = format!(r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
+
+    let mk = |id: &str, agent: &str| format!(
+        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts","src/auth/tokens.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+        id, token, agent
+    );
+    assert_eq!(send_line(&mut stream, &mk("3", &a))["ok"], true);
+    assert_eq!(send_line(&mut stream, &mk("4", &b))["ok"], true); // conflict opens on the shared files
+
+    drop(stream); // last agent leaves -> finalize -> knowledge persisted
+
+    let hz = core.root.join(".coordify/knowledge/hotzones.json");
+    let cp = core.root.join(".coordify/knowledge/coupling-graph.json");
+    let start = std::time::Instant::now();
+    let mut hz_contents = String::new();
+    while start.elapsed() < Duration::from_secs(3) {
+        if hz.exists() && cp.exists() {
+            hz_contents = std::fs::read_to_string(&hz).unwrap();
+            if hz_contents.contains("src/auth/session.ts") { break; }
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(hz.exists(), "hotzones.json should be written at finalize");
+    assert!(cp.exists(), "coupling-graph.json should be written at finalize");
+    assert!(hz_contents.contains("src/auth/session.ts"), "hotzone for the conflict file:\n{hz_contents}");
+    let cp_contents = std::fs::read_to_string(&cp).unwrap();
+    assert!(cp_contents.contains("src/auth/tokens.ts"), "coupling edge present:\n{cp_contents}");
+}
+
+#[test]
 fn reaper_escalates_timed_out_conflict_over_socket() {
     let core = spawn_core_fast_proposal_timeout("ptmo");
     let token = read_token(&core.root);
