@@ -400,6 +400,7 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
         None => {
             // No live claim: drop this agent's edges.
             shared.heat.lock().unwrap().remove_agent(agent_id);
+            shared.waitgraph.lock().unwrap().remove_agent(agent_id);
             let aborted = shared.conflicts.lock().unwrap().abort_for_agent(agent_id);
             if !aborted.is_empty() {
                 let mut log = shared.log.lock().unwrap();
@@ -804,6 +805,32 @@ pub fn spawn_reaper(
             }
         }
 
+        // Proposal-timeout sweep (§18.6): escalate conflicts that aged out
+        // without both proposals. Snapshot under a short conflict lock, then log.
+        let timed: Vec<Conflict> = {
+            let mut cs = shared.conflicts.lock().unwrap();
+            let ids = cs.timed_out(now, shared.conflict_cfg.proposal_timeout_ms);
+            let mut snaps = Vec::new();
+            for id in &ids {
+                cs.set_state(id, ConflictState::AwaitingUserDecision);
+                if let Some(c) = cs.get_by_id(id) {
+                    snaps.push(c.clone());
+                }
+            }
+            snaps
+        };
+        if !timed.is_empty() {
+            let mut log = shared.log.lock().unwrap();
+            for c in &timed {
+                let _ = log.append(&serde_json::json!({
+                    "type": "CONFLICT_TIMEOUT",
+                    "conflictId": c.conflict_id,
+                    "ts": crate::bootstrap::now_iso(),
+                }));
+                let _ = log.append(&build_arbitration(c));
+            }
+        }
+
         // Empty-network finalize: the last agent leaving ends the session
         // immediately (ARCHITECTURE §15). Note: because the accept loop is
         // serialized and a fully-empty network finalizes here, the orphan ->
@@ -1166,6 +1193,25 @@ mod tests {
         let resp = handle_request(&s, &cap_req("good", proposal_ev("conflict-999", &a, "CO_OWN")));
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("CONFLICT_NOT_FOUND"));
+    }
+
+    #[test]
+    fn timed_out_conflict_is_escalated() {
+        let s = shared_for_test("good");
+        let (_a, _b, id) = open_conflict_between_two(&s);
+        // Force the conflict's opened_at_ms far into the past so any timeout fires.
+        {
+            let mut cs = s.conflicts.lock().unwrap();
+            let timed = cs.timed_out(now_ms() + 10_000_000, s.conflict_cfg.proposal_timeout_ms);
+            assert_eq!(timed, vec![id.clone()]);
+            for cid in &timed {
+                cs.set_state(cid, crate::conflict::ConflictState::AwaitingUserDecision);
+            }
+        }
+        assert_eq!(
+            s.conflicts.lock().unwrap().get_by_id(&id).unwrap().state,
+            crate::conflict::ConflictState::AwaitingUserDecision
+        );
     }
 
     #[test]
