@@ -1538,6 +1538,8 @@ Recorded so reviewers do not flag these as gaps:
 - Full CAP envelope (§4: messageId, messageKind, projectRoot, sessionId, timestamp) — only `capVersion` is checked here.
 - Config-file tuning of confidence thresholds / TTL — hardcoded defaults + env overrides this phase.
 - JSON Schema files (`.schema.json`) for cross-language validation — deferred; typed serde is the Phase 2 validator.
+- **Claim ownership enforcement on `CLAIM_RELEASED`** — Phase 2 releases by `claimId` without checking the requester owns the claim (the event's `agentId` is logged, not enforced). Ownership/authorization checks are Phase 4 (conflict/handoff).
+- **PROVISIONAL claim does not promote the agent to ACTIVE** — deliberate. Per CAP_SPEC §9 a PROVISIONAL claim (confidence 0.45–0.75) is a lower-commitment state ("requires recheck before risky writes", "should be upgraded or released once clearer"). Only an ACTIVE-status claim promotes DISCOVERY→ACTIVE. PROVISIONAL→ACTIVE upgrade is Phase 3.
 
 ## Self-Review Notes
 
