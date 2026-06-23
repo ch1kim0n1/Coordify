@@ -48,7 +48,7 @@
 
 ### Go / No-Go
 
-**GO.** All hard-required blocking and detection assumptions pass. H3 is the only uncertainty and has an architectural fallback. PreToolUse blocking works reliably. `/clear` is detectable via `payload.source`. Latency is well within targets.
+**GO.** All hard-required blocking and detection assumptions pass. H3 confirmed FAIL — `UserPromptSubmit` stdout injection not consumed by Claude Code. Fallback confirmed: `SessionStart` stdout injection works and delivers per-session network context. PreToolUse blocking works reliably. `/clear` detectable via `payload.source`. Latency well within targets.
 
 Core implementation can begin.
 
