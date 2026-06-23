@@ -1,4 +1,5 @@
 use crate::cap::{self, CapErrorCode, CapEvent, ClaimStatus};
+use crate::conflict::ConflictStore;
 use crate::eventlog::EventLog;
 use crate::heat::{self, HeatBand, HeatConfig, Knowledge};
 use crate::heatstore::HeatStore;
@@ -20,6 +21,7 @@ pub struct Shared {
     pub heat: Mutex<HeatStore>,
     pub heat_cfg: HeatConfig,
     pub knowledge: Knowledge,
+    pub conflicts: Mutex<ConflictStore>,
 }
 
 pub fn handle_request(shared: &Shared, req: &Request) -> Response {
@@ -343,25 +345,65 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
         }
     };
 
-    // Compute (pure), then upsert + log.
-    let mut updates = Vec::new();
-    for other in &others {
-        let result = heat::compute_heat(&mine, other, &shared.knowledge, &shared.heat_cfg);
-        updates.push((other.agent_id.clone(), result));
+    // Compute (pure). Keep each other's inputs for conflict metadata.
+    let mut updates: Vec<(heat::HeatInputs, heat::HeatResult)> = Vec::new();
+    for other in others {
+        let result = heat::compute_heat(&mine, &other, &shared.knowledge, &shared.heat_cfg);
+        updates.push((other, result));
     }
     {
         let mut store = shared.heat.lock().unwrap();
-        for (other_id, result) in &updates {
-            store.upsert(agent_id, other_id, result.clone());
+        for (other, result) in &updates {
+            store.upsert(agent_id, &other.agent_id, result.clone());
+        }
+    }
+    // Decide conflict open/resolve per edge (collect events to log after).
+    let mut conflict_events: Vec<serde_json::Value> = Vec::new();
+    {
+        let mut cstore = shared.conflicts.lock().unwrap();
+        for (other, result) in &updates {
+            let other_id = &other.agent_id;
+            if result.band == HeatBand::ConflictCandidate {
+                if !cstore.has_open(agent_id, other_id) {
+                    let paths: Vec<String> =
+                        mine.files.intersection(&other.files).cloned().collect();
+                    let domains: Vec<String> =
+                        mine.domains.union(&other.domains).cloned().collect();
+                    let intents = vec![mine.intent.clone(), other.intent.clone()];
+                    if let Some(c) = cstore.open(agent_id, other_id, result.heat, paths, domains, intents) {
+                        conflict_events.push(serde_json::json!({
+                            "type": "CONFLICT_OPENED",
+                            "conflictId": c.conflict_id,
+                            "agents": [c.agents.0, c.agents.1],
+                            "openedAt": crate::bootstrap::now_iso(),
+                            "trigger": {"type": "HEAT_THRESHOLD", "heat": c.trigger_heat},
+                            "paths": c.paths,
+                            "domains": c.domains,
+                            "intents": c.intents,
+                            "requiredAction": "NEGOTIATE_OR_REASSIGN",
+                            "ts": crate::bootstrap::now_iso(),
+                        }));
+                    }
+                }
+            } else if cstore.has_open(agent_id, other_id) {
+                if let Some(c) = cstore.resolve(agent_id, other_id) {
+                    conflict_events.push(serde_json::json!({
+                        "type": "CONFLICT_RESOLVED",
+                        "conflictId": c.conflict_id,
+                        "resolution": "AUTO_RESOLVED_HEAT_DROPPED",
+                        "ts": crate::bootstrap::now_iso(),
+                    }));
+                }
+            }
         }
     }
     {
         let mut log = shared.log.lock().unwrap();
-        for (other_id, result) in &updates {
+        for (other, result) in &updates {
             let components = serde_json::to_value(&result.components).unwrap_or(serde_json::Value::Null);
             let _ = log.append(&serde_json::json!({
                 "type": "HEAT_UPDATED",
-                "pair": [agent_id, other_id],
+                "pair": [agent_id, other.agent_id],
                 "heat": result.heat,
                 "heatKind": "CURRENT",
                 "band": result.band.as_str(),
@@ -372,13 +414,16 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
             if let Some((level, action)) = escalation(result.band) {
                 let _ = log.append(&serde_json::json!({
                     "type": "HEAT_THRESHOLD_EXCEEDED",
-                    "pair": [agent_id, other_id],
+                    "pair": [agent_id, other.agent_id],
                     "heat": result.heat,
                     "escalationLevel": level,
                     "requiredAction": action,
                     "ts": crate::bootstrap::now_iso(),
                 }));
             }
+        }
+        for ev in &conflict_events {
+            let _ = log.append(ev);
         }
     }
 }
@@ -458,6 +503,7 @@ pub fn run(
         heat: Mutex::new(HeatStore::new()),
         heat_cfg: HeatConfig::default(),
         knowledge: Knowledge::default(),
+        conflicts: Mutex::new(ConflictStore::new()),
     });
 
     let interval_ms = std::env::var("COORDIFY_REAPER_INTERVAL_MS")
@@ -605,6 +651,7 @@ mod tests {
             heat: Mutex::new(HeatStore::new()),
             heat_cfg: HeatConfig::default(),
             knowledge: Knowledge::default(),
+            conflicts: Mutex::new(ConflictStore::new()),
         })
     }
 
@@ -822,6 +869,33 @@ mod tests {
         // release a claim that doesn't exist
         let resp = handle_request(&s, &cap_req("good", json!({"type":"CLAIM_RELEASED","claimId":"claim-404","agentId":"a","reason":"TASK_COMPLETED"})));
         assert_eq!(resp.error.as_deref(), Some("CLAIM_NOT_FOUND"));
+    }
+
+    #[test]
+    fn high_overlap_opens_exactly_one_conflict() {
+        let s = shared_for_test("good");
+        let a = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let b = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let mk = |agent: &str| json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{"summary":"fix session expiry"},"confidence":0.9});
+        assert!(handle_request(&s, &cap_req("good", mk(&a))).ok);
+        assert!(handle_request(&s, &cap_req("good", mk(&b))).ok); // heat 80 -> ConflictCandidate
+        assert_eq!(s.conflicts.lock().unwrap().open_count(), 1);
+        assert!(s.conflicts.lock().unwrap().has_open(&a, &b));
+        // Re-proposing/recompute must not open a duplicate.
+        recompute_current_heat(&s, &a);
+        assert_eq!(s.conflicts.lock().unwrap().open_count(), 1);
+    }
+
+    #[test]
+    fn low_overlap_opens_no_conflict() {
+        let s = shared_for_test("good");
+        let a = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        let b = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        let ca = json!({"type":"CLAIM_PROPOSED","agentId":a,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/a.rs"],"task":{"summary":"alpha"},"confidence":0.9});
+        let cb = json!({"type":"CLAIM_PROPOSED","agentId":b,"intent":"DOCUMENTATION","domains":["DOCS"],"estimatedFiles":["docs/b.md"],"task":{"summary":"beta"},"confidence":0.9});
+        assert!(handle_request(&s, &cap_req("good", ca)).ok);
+        assert!(handle_request(&s, &cap_req("good", cb)).ok);
+        assert_eq!(s.conflicts.lock().unwrap().open_count(), 0);
     }
 
     #[test]

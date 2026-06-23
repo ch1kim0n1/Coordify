@@ -614,3 +614,44 @@ fn lock_acquisition_error_exits_one() {
     );
     let _ = std::fs::remove_dir_all(&root);
 }
+
+#[test]
+fn high_overlap_claims_open_conflict() {
+    let core = spawn_core("conflict");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+
+    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
+    let reg_b = format!(r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
+
+    let mk = |id: &str, agent: &str| format!(
+        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+        id, token, agent
+    );
+    assert_eq!(send_line(&mut stream, &mk("3", &a))["ok"], true);
+    assert_eq!(send_line(&mut stream, &mk("4", &b))["ok"], true);
+
+    drop(stream); // connection closed.
+
+    let sessions = core.root.join(".coordify/sessions");
+    let mut log_contents = String::new();
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        if let Ok(entries) = std::fs::read_dir(&sessions) {
+            for e in entries.flatten() {
+                let log = e.path().join("events.log");
+                if log.exists() {
+                    log_contents = std::fs::read_to_string(log).unwrap();
+                }
+            }
+        }
+        if log_contents.contains("CONFLICT_OPENED") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(log_contents.contains("CONFLICT_OPENED"), "no CONFLICT_OPENED logged for high-overlap pair");
+}
