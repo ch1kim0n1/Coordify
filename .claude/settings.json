@@ -2,37 +2,58 @@
   "hooks": {
     "SessionStart": [
       {
-        "command": "node phase-0/hooks/session-start.js"
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "node phase-0/hooks/session-start.js" }
+        ]
       }
     ],
     "UserPromptSubmit": [
       {
-        "command": "node phase-0/hooks/user-prompt-submit.js"
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "node phase-0/hooks/user-prompt-submit.js" }
+        ]
       }
     ],
     "PreToolUse": [
       {
-        "command": "node phase-0/hooks/pre-tool-use.js"
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "node phase-0/hooks/pre-tool-use.js" }
+        ]
       }
     ],
     "PostToolUse": [
       {
-        "command": "node phase-0/hooks/post-tool-use.js"
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "node phase-0/hooks/post-tool-use.js" }
+        ]
       }
     ],
     "SubagentStart": [
       {
-        "command": "node phase-0/hooks/subagent-start.js"
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "node phase-0/hooks/subagent-start.js" }
+        ]
       }
     ],
     "SubagentStop": [
       {
-        "command": "node phase-0/hooks/subagent-stop.js"
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "node phase-0/hooks/subagent-stop.js" }
+        ]
       }
     ],
     "SessionEnd": [
       {
-        "command": "node phase-0/hooks/session-end.js"
+        "matcher": "",
+        "hooks": [
+          { "type": "command", "command": "node phase-0/hooks/session-end.js" }
+        ]
       }
     ]
   }
