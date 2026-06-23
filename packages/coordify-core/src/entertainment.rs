@@ -378,7 +378,7 @@ pub fn build_entertainment(events: &[Value], stats: &SessionStats) -> Entertainm
         for (file, count) in &file_counts {
             let update = match &best {
                 None => true,
-                Some((bf, bc)) => count > bc || (count == bc && file < bf),
+                Some((_, bc)) => count > bc,
             };
             if update {
                 best = Some((file.clone(), *count));
@@ -433,19 +433,14 @@ pub fn build_entertainment(events: &[Value], stats: &SessionStats) -> Entertainm
         });
     }
 
-    // diplomat
-    {
-        let max_val = diplomat_count.values().copied().max().unwrap_or(0);
-        if max_val > 0 {
-            if let Some((agent, _)) = diplomat_count.iter().find(|(_, &v)| v == max_val) {
-                badges.push(Badge {
-                    id: "diplomat".to_string(),
-                    label: "Diplomat".to_string(),
-                    color: "blue".to_string(),
-                    agent: agent.clone(),
-                });
-            }
-        }
+    // diplomat: agent with most non-escalated proposals (any count > 0)
+    if let Some((agent, _)) = diplomat_count.iter().filter(|(_, &v)| v > 0).max_by(|(a1, &v1), (a2, &v2)| v1.cmp(&v2).then(a2.cmp(a1))) {
+        badges.push(Badge {
+            id: "diplomat".to_string(),
+            label: "Diplomat".to_string(),
+            color: "blue".to_string(),
+            agent: agent.clone(),
+        });
     }
 
     // hotzone_hero: lowest-id agent who FILE_TOUCHED the battleground file
@@ -818,7 +813,7 @@ mod tests {
             "narrative has non-ASCII/emoji"
         );
         assert!(
-            e.narrative.contains("recap") || e.narrative.contains("Session"),
+            e.narrative.contains("recap") | e.narrative.contains("Session"),
         );
     }
 

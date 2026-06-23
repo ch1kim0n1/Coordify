@@ -271,7 +271,7 @@ impl ProfileStore {
 
     pub fn save_atomic(&self, dir: &Path) -> std::io::Result<()> {
         std::fs::create_dir_all(dir)?;
-        let profiles = serde_json::to_string_pretty(&self.agents).unwrap_or_else(|_| "{}".into());
+        let profiles = serde_json::to_string_pretty(&self.agents).unwrap();
         crate::knowledge::write_atomic(&dir.join("agent-profiles.json"), &profiles)?;
 
         let velocity: BTreeMap<&String, Value> = self
@@ -286,7 +286,7 @@ impl ProfileStore {
             .collect();
         crate::knowledge::write_atomic(
             &dir.join("velocity-profiles.json"),
-            &serde_json::to_string_pretty(&velocity).unwrap_or_else(|_| "{}".into()),
+            &serde_json::to_string_pretty(&velocity).unwrap(),
         )?;
 
         let overhead: BTreeMap<&String, Value> = self
@@ -303,7 +303,7 @@ impl ProfileStore {
             .collect();
         crate::knowledge::write_atomic(
             &dir.join("coordination-overhead.json"),
-            &serde_json::to_string_pretty(&overhead).unwrap_or_else(|_| "{}".into()),
+            &serde_json::to_string_pretty(&overhead).unwrap(),
         )?;
         Ok(())
     }
@@ -313,8 +313,6 @@ impl ProfileStore {
 mod tests {
     use super::*;
     use serde_json::json;
-
-    fn ev(v: serde_json::Value) -> serde_json::Value { v }
 
     fn sample() -> Vec<serde_json::Value> {
         vec![
@@ -420,11 +418,6 @@ mod tests {
         assert_eq!(a3.deadlocks_involved, 1);
         assert_eq!(a3.arbitrations_involved, 0);
     }
-
-    // Suppress unused-import warning for `ev` helper (used as a no-op wrapper
-    // in case the brief's tests use it directly).
-    #[allow(dead_code)]
-    fn _use_ev() { let _ = ev(serde_json::Value::Null); }
 
     #[test]
     fn profile_merge_accumulates_across_sessions() {
@@ -537,5 +530,29 @@ mod tests {
         assert_eq!(vel["zero-agent"]["tasksPerSession"], 0.0);
         assert_eq!(vel["zero-agent"]["meanHeatGenerated"], 0.0);
         let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn profile_save_atomic_io_errors() {
+        use std::os::unix::fs::PermissionsExt;
+
+        let base = std::env::temp_dir().join(format!("cp-{}-io", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        std::fs::create_dir_all(&base).unwrap();
+
+        // create_dir_all failure: write a regular file at the target dir path
+        let blocked_dir = base.join("blocked");
+        std::fs::write(&blocked_dir, b"not-a-dir").unwrap();
+        let store = ProfileStore::default();
+        assert!(store.save_atomic(&blocked_dir).is_err());
+
+        // write_atomic failure: dir exists but is read-only
+        let ro_dir = base.join("readonly");
+        std::fs::create_dir_all(&ro_dir).unwrap();
+        std::fs::set_permissions(&ro_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        assert!(store.save_atomic(&ro_dir).is_err());
+        std::fs::set_permissions(&ro_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let _ = std::fs::remove_dir_all(&base);
     }
 }
