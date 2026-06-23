@@ -62,6 +62,7 @@ test('full hook pipe registers, claims, state-changes, releases', async (t) => {
     await emit(sockPath, { hook: 'SessionStart', payload: { source: 'startup', cwd: root, session_id: SESSION } });
     await emit(sockPath, { hook: 'UserPromptSubmit', payload: { prompt: 'fix the session expiry bug', cwd: root, session_id: SESSION } });
     await emit(sockPath, { hook: 'PostToolUse', payload: { tool_name: 'Write', tool_input: { file_path: 'src/auth/session.ts' }, cwd: root, session_id: SESSION } });
+    await emit(sockPath, { hook: 'PostToolUse', payload: { tool_name: 'Read', tool_input: { file_path: 'src/auth/tokens.ts' }, cwd: root, session_id: SESSION } });
     await emit(sockPath, { hook: 'SubagentStart', payload: { cwd: root, session_id: SESSION } });
     await emit(sockPath, { hook: 'SubagentStop', payload: { cwd: root, session_id: SESSION } });
 
@@ -72,11 +73,16 @@ test('full hook pipe registers, claims, state-changes, releases', async (t) => {
     assert.ok(log.includes('AGENT_JOINED'), 'agent registered');
     assert.ok(log.includes('AGENT_STATE_CHANGED'), 'subagent state change forwarded');
 
-    // PostToolUse(Write) is recorded-only: it lands in the hooktrace, NOT Core's log.
+    // PostToolUse(Write) now forwards FILE_TOUCHED to Core (was recorded-only).
+    const fwdLog = await waitFor(() => readEventsLog(root).includes('FILE_TOUCHED'), 5000);
+    assert.ok(fwdLog, 'FILE_TOUCHED forwarded to Core log:\n' + readEventsLog(root));
+    assert.ok(readEventsLog(root).includes('src/auth/session.ts'), 'touched file in Core log');
+
+    // PostToolUse(Read) stays recorded-only: it lands in the hooktrace, NOT Core's log.
     const traceFiles = fs.readdirSync(paths.agentsDir(root)).filter(f => f.endsWith('.hooktrace.jsonl'));
-    assert.ok(traceFiles.length >= 1, 'a hooktrace file exists');
+    assert.ok(traceFiles.length >= 1, 'a hooktrace file exists (from the recorded-only Read)');
     const trace = fs.readFileSync(path.join(paths.agentsDir(root), traceFiles[0]), 'utf8');
-    assert.ok(trace.includes('FILE_TOUCHED'), 'recorded-only FILE_TOUCHED in trace');
+    assert.ok(trace.includes('FILE_READ'), 'recorded-only FILE_READ in trace');
     assert.ok(!readEventsLog(root).includes('SCHEMA_VALIDATION_FAILED'), 'no rejected events in Core log');
 
     // SessionEnd releases + disconnects; with the last agent gone Core finalizes.

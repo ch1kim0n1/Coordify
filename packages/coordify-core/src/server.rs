@@ -340,6 +340,47 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                 }
             }
         }
+        CapEvent::FileTouched { agent_id, files } => {
+            // Add touched files under a short state lock; capture the new subset.
+            let outcome = {
+                let mut st = shared.state.lock().unwrap();
+                if st.agent_state(&agent_id).is_none() {
+                    None // agent unknown
+                } else {
+                    Some(st.claims.record_touched(&agent_id, &files))
+                }
+            };
+            let new_files = match outcome {
+                None => return cap_err(&req.id, CapErrorCode::AgentNotFound),
+                Some(None) => return cap_err(&req.id, CapErrorCode::ClaimNotFound),
+                Some(Some(v)) => v,
+            };
+            {
+                let _ = shared.log.lock().unwrap().append(&serde_json::json!({
+                    "type": "FILE_TOUCHED",
+                    "agentId": agent_id,
+                    "files": files,
+                    "newFiles": new_files,
+                    "ts": crate::bootstrap::now_iso(),
+                }));
+            }
+            // Heat reflects the new files.
+            recompute_current_heat(shared, &agent_id);
+            // Coupling among co-touched files (new x existing), knowledge lock alone.
+            if !new_files.is_empty() {
+                let all_files: Vec<String> = {
+                    let st = shared.state.lock().unwrap();
+                    st.claims
+                        .live_claim_for(&agent_id)
+                        .map(|c| c.actual_files.iter().cloned().collect())
+                        .unwrap_or_default()
+                };
+                if all_files.len() >= 2 {
+                    shared.knowledge.lock().unwrap().record_cotouch(&all_files, &new_files);
+                }
+            }
+            Response::ok_for(&req.id)
+        }
     }
 }
 
@@ -1316,6 +1357,45 @@ mod tests {
             s.conflicts.lock().unwrap().get_by_id(&id).unwrap().state,
             crate::conflict::ConflictState::Detected
         );
+    }
+
+    #[test]
+    fn file_touched_raises_overlap_heat_and_accrues_coupling() {
+        let s = shared_for_test("good");
+        let a = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let b = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        // Disjoint estimated files -> low overlap.
+        let ca = json!({"type":"CLAIM_PROPOSED","agentId":a,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/a.rs"],"task":{"summary":"alpha work"},"confidence":0.9});
+        let cb = json!({"type":"CLAIM_PROPOSED","agentId":b,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/b.rs"],"task":{"summary":"beta work"},"confidence":0.9});
+        assert!(handle_request(&s, &cap_req("good", ca)).ok);
+        assert!(handle_request(&s, &cap_req("good", cb)).ok);
+        // Heat from the disjoint-file claims, BEFORE any file overlap.
+        let before = s.heat.lock().unwrap().get(&a, &b).expect("edge exists").heat;
+        // Both touch the SAME file -> overlap heat rises.
+        assert!(handle_request(&s, &cap_req("good", json!({"type":"FILE_TOUCHED","agentId":a,"files":["src/shared.rs","src/a.rs"]}))).ok);
+        assert!(handle_request(&s, &cap_req("good", json!({"type":"FILE_TOUCHED","agentId":b,"files":["src/shared.rs"]}))).ok);
+        let after = s.heat.lock().unwrap().get(&a, &b).expect("edge exists").heat;
+        assert!(after > before, "shared touched file must raise heat: before={before} after={after}");
+        // a touched two files together -> they couple.
+        assert!(s.knowledge.lock().unwrap().coupling_count("src/shared.rs", "src/a.rs") >= 1);
+    }
+
+    #[test]
+    fn file_touched_unknown_agent_errors() {
+        let s = shared_for_test("good");
+        let resp = handle_request(&s, &cap_req("good", json!({"type":"FILE_TOUCHED","agentId":"agent-404","files":["x"]})));
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_deref(), Some("AGENT_NOT_FOUND"));
+    }
+
+    #[test]
+    fn file_touched_claimless_agent_errors() {
+        let s = shared_for_test("good");
+        let a = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        // Registered but no claim -> CLAIM_NOT_FOUND.
+        let resp = handle_request(&s, &cap_req("good", json!({"type":"FILE_TOUCHED","agentId":a,"files":["x"]})));
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_deref(), Some("CLAIM_NOT_FOUND"));
     }
 
     #[test]

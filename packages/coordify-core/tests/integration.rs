@@ -814,6 +814,53 @@ fn knowledge_files_written_after_conflict_session() {
 }
 
 #[test]
+fn file_touched_over_socket_raises_heat() {
+    let core = spawn_core("ftouch");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+
+    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
+    let reg_b = format!(r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
+
+    // Claims with NO estimated files (like the real adapter).
+    let claim = |id: &str, agent: &str| format!(
+        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"task":{{"summary":"work"}},"confidence":0.9}}}}"#,
+        id, token, agent
+    );
+    assert_eq!(send_line(&mut stream, &claim("3", &a))["ok"], true);
+    assert_eq!(send_line(&mut stream, &claim("4", &b))["ok"], true);
+
+    let touch = |id: &str, agent: &str| format!(
+        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"FILE_TOUCHED","agentId":"{}","files":["src/auth/session.ts"]}}}}"#,
+        id, token, agent
+    );
+    assert_eq!(send_line(&mut stream, &touch("5", &a))["ok"], true);
+    assert_eq!(send_line(&mut stream, &touch("6", &b))["ok"], true);
+
+    drop(stream);
+
+    let sessions = core.root.join(".coordify/sessions");
+    let mut log = String::new();
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(3) {
+        if let Ok(entries) = std::fs::read_dir(&sessions) {
+            for e in entries.flatten() {
+                let f = e.path().join("events.log");
+                if f.exists() { log = std::fs::read_to_string(f).unwrap(); }
+            }
+        }
+        if log.contains("FILE_TOUCHED") && log.contains("\"pair\"") { break; }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(log.contains("FILE_TOUCHED"), "FILE_TOUCHED logged");
+    assert!(log.contains("src/auth/session.ts"), "touched file in log:\n{log}");
+    assert!(log.contains("HEAT_UPDATED"), "FILE_TOUCHED should trigger heat recompute:\n{log}");
+}
+
+#[test]
 fn reaper_escalates_timed_out_conflict_over_socket() {
     let core = spawn_core_fast_proposal_timeout("ptmo");
     let token = read_token(&core.root);

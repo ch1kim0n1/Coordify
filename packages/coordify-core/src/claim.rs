@@ -1,5 +1,5 @@
 use crate::cap::ClaimStatus;
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 
 pub const ACTIVE_MIN: f64 = 0.75;
 pub const PROVISIONAL_MIN: f64 = 0.45;
@@ -13,6 +13,7 @@ pub struct Claim {
     pub intent: String,
     pub domains: Vec<String>,
     pub estimated_files: Vec<String>,
+    pub actual_files: BTreeSet<String>,
     pub confidence: f64,
     pub orphaned_at_ms: Option<u64>,
 }
@@ -61,6 +62,7 @@ impl ClaimStore {
             intent,
             domains,
             estimated_files,
+            actual_files: BTreeSet::new(),
             confidence,
             orphaned_at_ms: None,
         };
@@ -73,6 +75,28 @@ impl ClaimStore {
             c.agent_id == agent_id
                 && matches!(c.status, ClaimStatus::Active | ClaimStatus::Provisional)
         })
+    }
+
+    /// Add touched files to the agent's live claim's actual-file set.
+    /// Returns the subset that was newly inserted (empty if all already
+    /// present), or None if the agent has no live claim.
+    pub fn record_touched(&mut self, agent_id: &str, files: &[String]) -> Option<Vec<String>> {
+        let id = self
+            .claims
+            .values()
+            .find(|c| {
+                c.agent_id == agent_id
+                    && matches!(c.status, ClaimStatus::Active | ClaimStatus::Provisional)
+            })
+            .map(|c| c.claim_id.clone())?;
+        let claim = self.claims.get_mut(&id).unwrap();
+        let mut newly = Vec::new();
+        for f in files {
+            if claim.actual_files.insert(f.clone()) {
+                newly.push(f.clone());
+            }
+        }
+        Some(newly)
     }
 
     /// Mark a single claim RELEASED. Returns false if the claim does not exist
@@ -240,5 +264,20 @@ mod tests {
         assert!(s.is_empty());
         s.propose("agent-1", "t".into(), "BUGFIX".into(), vec![], vec![], 0.9);
         assert!(!s.is_empty());
+    }
+
+    #[test]
+    fn record_touched_adds_dedups_and_returns_new() {
+        let mut s = ClaimStore::new();
+        let c = s.propose("agent-1", "t".into(), "BUGFIX".into(), vec![], vec![], 0.9).unwrap();
+        assert_eq!(c.status, ClaimStatus::Active);
+        // first touch: both new
+        let new = s.record_touched("agent-1", &["a.rs".into(), "b.rs".into()]).unwrap();
+        assert_eq!(new, vec!["a.rs".to_string(), "b.rs".to_string()]);
+        // re-touch a.rs + new c.rs: only c.rs is new
+        let new2 = s.record_touched("agent-1", &["a.rs".into(), "c.rs".into()]).unwrap();
+        assert_eq!(new2, vec!["c.rs".to_string()]);
+        // no live claim
+        assert!(s.record_touched("agent-404", &["x".into()]).is_none());
     }
 }
