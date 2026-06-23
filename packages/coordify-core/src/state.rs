@@ -72,6 +72,10 @@ impl State {
         self.agents.get(id).map(|a| a.state)
     }
 
+    pub fn agent_generation(&self, id: &str) -> Option<u64> {
+        self.agents.get(id).map(|a| a.generation)
+    }
+
     pub fn set_state(&mut self, id: &str, to: AgentState) -> Result<(), StateError> {
         let agent = self.agents.get_mut(id).ok_or(StateError::AgentNotFound)?;
         if !can_transition(agent.state, to) {
@@ -204,6 +208,7 @@ mod tests {
         let mut s = State::new();
         let id = s.register(serde_json::json!({}), 1000);
         assert_eq!(s.agent_state(&id), Some(crate::cap::AgentState::Discovery));
+        assert_eq!(s.agent_generation(&id), Some(1));
     }
 
     #[test]
