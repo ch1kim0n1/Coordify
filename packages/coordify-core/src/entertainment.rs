@@ -832,6 +832,68 @@ mod tests {
     }
 
     #[test]
+    fn entertainment_guard_branches_and_update_false_paths() {
+        // Covers: ordered_pair else branch, heat-decreasing, biggest_spike update=false,
+        // longest_neg update=false, event-without-ts, CONFLICT_OPENED without ts/paths,
+        // CONFLICT_RESOLVED for unknown cid, CONFLICT_RESOLVED without ts,
+        // CONFLICT_PROPOSAL_RECEIVED non-diplomat kind + empty from,
+        // FILE_TOUCHED without files / with non-string element,
+        // CLAIM_CREATED without ts, CLAIM_RELEASED without matching create,
+        // HEAT_UPDATED missing/short pair field.
+        let evs = vec![
+            // ordered_pair else branch: "z" > "a" → swap
+            json!({"type":"HEAT_UPDATED","pair":["z","a"],"heat":10,"band":"SAFE","ts":"2026-06-23T00:00:00Z"}),
+            // heat decreasing → if heat > prev = false (line 274)
+            json!({"type":"HEAT_UPDATED","pair":["z","a"],"heat":5,"band":"SAFE","ts":"2026-06-23T00:00:01Z"}),
+            // big spike: 5 → 40 = delta 35 (first spike, None → stored)
+            json!({"type":"HEAT_UPDATED","pair":["z","a"],"heat":40,"band":"CONFLICT_CANDIDATE","ts":"2026-06-23T00:00:02Z"}),
+            // small spike: 40 → 45 = delta 5 < 35 → biggest_spike update=false (line 273)
+            json!({"type":"HEAT_UPDATED","pair":["z","a"],"heat":45,"band":"CONFLICT_CANDIDATE","ts":"2026-06-23T00:00:03Z"}),
+            // HEAT_UPDATED without pair field → if let Some(arr) false (line 279)
+            json!({"type":"HEAT_UPDATED","heat":50,"band":"MONITOR","ts":"2026-06-23T00:00:04Z"}),
+            // HEAT_UPDATED with 1-element pair → arr.len() != 2 (line 278)
+            json!({"type":"HEAT_UPDATED","pair":["solo"],"heat":50,"band":"MONITOR","ts":"2026-06-23T00:00:05Z"}),
+            // event without ts → bloodiest_minute if let Some(ms) false (line 194)
+            json!({"type":"AGENT_JOINED","agentId":"x"}),
+            // CONFLICT_OPENED without ts → conflict_open.insert skipped (line 217)
+            json!({"type":"CONFLICT_OPENED","conflictId":"co-no-ts","agents":["a","b"],"paths":["f.rs"]}),
+            // CONFLICT_OPENED without paths field → if let Some(arr) false (line 224)
+            json!({"type":"CONFLICT_OPENED","conflictId":"c-1","agents":["a","b"],"ts":"2026-06-23T00:00:06Z"}),
+            // CONFLICT_RESOLVED for unknown cid → conflict_open.remove returns None (line 241)
+            json!({"type":"CONFLICT_RESOLVED","conflictId":"no-such","resolution":"PARTICIPANT_STEPPED_ASIDE","ts":"2026-06-23T00:00:07Z"}),
+            // Long conflict c-a: 3000ms (first → None → stored as max)
+            json!({"type":"CONFLICT_OPENED","conflictId":"c-a","agents":["a","b"],"paths":[],"ts":"2026-06-23T00:00:08Z"}),
+            json!({"type":"CONFLICT_RESOLVED","conflictId":"c-a","resolution":"PARTICIPANT_STEPPED_ASIDE","ts":"2026-06-23T00:00:11Z"}),
+            // Short conflict c-b: 1000ms < 3000ms → longest_neg update=false (line 239)
+            json!({"type":"CONFLICT_OPENED","conflictId":"c-b","agents":["a","b"],"paths":[],"ts":"2026-06-23T00:00:12Z"}),
+            json!({"type":"CONFLICT_RESOLVED","conflictId":"c-b","resolution":"PARTICIPANT_STEPPED_ASIDE","ts":"2026-06-23T00:00:13Z"}),
+            // CONFLICT_RESOLVED without ts → if let Some(close_ms) false (line 240)
+            json!({"type":"CONFLICT_RESOLVED","conflictId":"c-1","resolution":"PARTICIPANT_STEPPED_ASIDE"}),
+            // CONFLICT_PROPOSAL_RECEIVED with non-diplomat kind → if kind == false (lines 245/250)
+            json!({"type":"CONFLICT_PROPOSAL_RECEIVED","conflictId":"c-1","from":"agent-x","kind":"COMPETE","ts":"2026-06-23T00:00:14Z"}),
+            // CONFLICT_PROPOSAL_RECEIVED with diplomat kind but empty from → if !from.is_empty() false (line 249)
+            json!({"type":"CONFLICT_PROPOSAL_RECEIVED","conflictId":"c-1","from":"","kind":"CO_OWN","ts":"2026-06-23T00:00:15Z"}),
+            // FILE_TOUCHED without files field → if let Some(arr) false (line 211)
+            json!({"type":"FILE_TOUCHED","agentId":"agent-x","ts":"2026-06-23T00:00:16Z"}),
+            // FILE_TOUCHED with non-string element → if let Some(p) false (line 209)
+            json!({"type":"FILE_TOUCHED","agentId":"agent-x","files":[42],"ts":"2026-06-23T00:00:17Z"}),
+            // CLAIM_CREATED without ts → if let Some(ms) false (line 285)
+            json!({"type":"CLAIM_CREATED","claimId":"no-ts-claim","agentId":"agent-x"}),
+            // CLAIM_RELEASED without matching create → if let (Some, Some) false (line 299)
+            json!({"type":"CLAIM_RELEASED","claimId":"no-such-claim","agentId":"agent-x","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:18Z"}),
+        ];
+        let stats = crate::stats::summarize(&evs);
+        let e = build_entertainment(&evs, &stats);
+        // biggest spike = 35 (5→40), not 5 (40→45)
+        let spike = e.superlatives.iter().find(|s| s.key == "biggest_spike").unwrap();
+        assert_eq!(spike.value["delta"], 35);
+        // longest negotiation = c-a (3000ms), not c-b (1000ms)
+        let neg = e.superlatives.iter().find(|s| s.key == "longest_negotiation").unwrap();
+        assert_eq!(neg.value["ms"], 3000);
+        assert!(!e.narrative.is_empty());
+    }
+
+    #[test]
     fn multi_spike_and_multi_conflict_hits_some_arms() {
         // 3 HEAT_UPDATED on the same pair → two spikes; second spike (50) beats first (20)
         // → exercises the Some(d) => delta > *d arm of biggest_spike
@@ -852,5 +914,50 @@ mod tests {
         assert_eq!(spike.value["delta"], 50);
         let neg = e.superlatives.iter().find(|s| s.key == "longest_negotiation").unwrap();
         assert_eq!(neg.value["ms"], 3000);
+    }
+
+    #[test]
+    fn ghost_badge_speed_demon_comparator_and_battleground_some_arm() {
+        // Covers:
+        //   battleground Some arm (line 381) + update=false branch (line 385): 3 files in
+        //     file_counts; second and third iteration hit the Some arm; third has lower count → update=false
+        //   ghost badge (lines 417-421): CLAIM_ORPHANED gives agent-b ghost_claims > 0
+        //   speed_demon min_by comparator (lines 508-514): two agents with matched claims
+        //   CONFLICT_OPENED paths non-string (line 222): paths array containing integer
+        //   HEAT_UPDATED pair with non-string (line 277): pair [42, "a"] → if let (Some,Some) = false
+        //   CLAIM_RELEASED empty agentId (line 299): dur >= 0 but agent.is_empty() → false branch
+        let evs = vec![
+            // 3 distinct files: hot.rs count=3, cold.rs count=1, other.rs count=1
+            json!({"type":"FILE_TOUCHED","agentId":"a","files":["hot.rs","cold.rs"],"ts":"2026-06-23T00:00:00Z"}),
+            json!({"type":"FILE_TOUCHED","agentId":"b","files":["hot.rs"],"ts":"2026-06-23T00:00:01Z"}),
+            json!({"type":"CONFLICT_OPENED","conflictId":"c-1","agents":["a","b"],"paths":["hot.rs"],"ts":"2026-06-23T00:00:02Z"}),
+            // CONFLICT_OPENED with non-string path → line 222 false branch
+            json!({"type":"CONFLICT_OPENED","conflictId":"c-2","agents":["a","b"],"paths":[42,"other.rs"],"ts":"2026-06-23T00:00:03Z"}),
+            // HEAT_UPDATED with non-string pair element → line 277 false branch
+            json!({"type":"HEAT_UPDATED","pair":[42,"a"],"heat":30,"band":"MONITOR","ts":"2026-06-23T00:00:04Z"}),
+            // Ghost claim for b → ghost badge
+            json!({"type":"CLAIM_ORPHANED","claimId":"ghost-claim","previousOwner":"b","ts":"2026-06-23T00:00:05Z"}),
+            // Two agents with equal avg claim duration → speed_demon comparator fires (line 508-514)
+            // and then_with tiebreak (line 513 col 35) is exercised when partial_cmp = Equal
+            json!({"type":"CLAIM_CREATED","claimId":"ca","agentId":"a","ts":"2026-06-23T00:00:06Z"}),
+            json!({"type":"CLAIM_RELEASED","claimId":"ca","agentId":"a","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:08Z"}),  // 2000ms
+            json!({"type":"CLAIM_CREATED","claimId":"cb","agentId":"b","ts":"2026-06-23T00:00:09Z"}),
+            json!({"type":"CLAIM_RELEASED","claimId":"cb","agentId":"b","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:11Z"}),  // 2000ms — equal avg → tiebreak by agent id
+            // CLAIM_RELEASED with empty agentId → if dur >= 0 && !agent.is_empty() = false (line 299)
+            json!({"type":"CLAIM_CREATED","claimId":"cc","agentId":"c","ts":"2026-06-23T00:00:15Z"}),
+            json!({"type":"CLAIM_RELEASED","claimId":"cc","agentId":"","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:16Z"}),
+        ];
+        let stats = crate::stats::summarize(&evs);
+        let e = build_entertainment(&evs, &stats);
+        // battleground = hot.rs (3 hits, "cold.rs"=1 and "other.rs"=1 don't beat it)
+        let bg = e.superlatives.iter().find(|s| s.key == "the_battleground").unwrap();
+        assert_eq!(bg.value["file"], "hot.rs");
+        // ghost badge awarded to b
+        let ghost = e.badges.iter().find(|b| b.id == "ghost").unwrap();
+        assert_eq!(ghost.agent, "b");
+        // speed_demon = a (avg 2000ms < b's 5000ms)
+        let speed = e.badges.iter().find(|b| b.id == "speed_demon").unwrap();
+        assert_eq!(speed.agent, "a");
+        assert!(!e.narrative.is_empty());
     }
 }

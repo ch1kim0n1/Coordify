@@ -470,4 +470,72 @@ mod tests {
         assert!(store.agents.is_empty());
         let _ = std::fs::remove_dir_all(&dir);
     }
+
+    #[test]
+    fn summarize_edge_cases() {
+        let evs = vec![
+            // no ts → first_ts/last_ts None branch
+            json!({"type":"AGENT_JOINED","agentId":"agent-x"}),
+            // empty agentId → if !id.is_empty() false branch
+            json!({"type":"AGENT_JOINED","agentId":"","ts":"2026-06-23T00:00:00Z"}),
+            // empty previousOwner → if !id.is_empty() false branch in CLAIM_ORPHANED
+            json!({"type":"CLAIM_ORPHANED","claimId":"c-1","previousOwner":"","ts":"2026-06-23T00:00:01Z"}),
+            // FILE_TOUCHED with non-string element → if let Some(p) false branch
+            json!({"type":"FILE_TOUCHED","agentId":"agent-x","files":[42],"ts":"2026-06-23T00:00:02Z"}),
+            // HEAT_UPDATED with 3-element pair → ev_pair returns None (arr.len() != 2)
+            json!({"type":"HEAT_UPDATED","pair":["a","b","c"],"heat":50,"band":"OVERLAP","ts":"2026-06-23T00:00:03Z"}),
+            // HEAT_UPDATED: no pair key → e.get("pair")? = None (line 13, first ?)
+            json!({"type":"HEAT_UPDATED","heat":30,"band":"SAFE","ts":"2026-06-23T00:00:03Z"}),
+            // HEAT_UPDATED: pair is object (not array) → .as_array()? = None (line 13, second ?)
+            json!({"type":"HEAT_UPDATED","pair":{"a":1},"heat":30,"band":"SAFE","ts":"2026-06-23T00:00:03Z"}),
+            // HEAT_UPDATED: first element non-string → arr[0].as_str()? = None (line 15, first ?)
+            json!({"type":"HEAT_UPDATED","pair":[42,"b"],"heat":30,"band":"SAFE","ts":"2026-06-23T00:00:03Z"}),
+            // HEAT_UPDATED: second element non-string → arr[1].as_str()? = None (line 15, second ?)
+            json!({"type":"HEAT_UPDATED","pair":["a",42],"heat":30,"band":"SAFE","ts":"2026-06-23T00:00:03Z"}),
+            // CONFLICT_OPENED with 3-element agents → ev_pair returns None
+            json!({"type":"CONFLICT_OPENED","conflictId":"c-x","agents":["a","b","c"],"paths":["x.rs"],"ts":"2026-06-23T00:00:04Z"}),
+            // CONFLICT_RESOLVED: AUTO_RESOLVED_HEAT_DROPPED arm
+            json!({"type":"CONFLICT_RESOLVED","conflictId":"c-1","resolution":"AUTO_RESOLVED_HEAT_DROPPED","ts":"2026-06-23T00:00:05Z"}),
+            // CONFLICT_RESOLVED: USER_ARBITRATED arm
+            json!({"type":"CONFLICT_RESOLVED","conflictId":"c-2","resolution":"USER_ARBITRATED","ts":"2026-06-23T00:00:06Z"}),
+            // CONFLICT_RESOLVED: CO_OWNERSHIP arm (multi-pattern)
+            json!({"type":"CONFLICT_RESOLVED","conflictId":"c-3","resolution":"CO_OWNERSHIP","ts":"2026-06-23T00:00:07Z"}),
+            // CONFLICT_RESOLVED: unknown resolution → _ => {}
+            json!({"type":"CONFLICT_RESOLVED","conflictId":"c-4","resolution":"UNKNOWN_RES","ts":"2026-06-23T00:00:08Z"}),
+            // CONFLICT_ESCALATED
+            json!({"type":"CONFLICT_ESCALATED","conflictId":"c-5","reason":"TIMEOUT","ts":"2026-06-23T00:00:09Z"}),
+            // USER_ARBITRATION_REQUIRED with 1-element agents → ev_pair None (no per-agent tally)
+            json!({"type":"USER_ARBITRATION_REQUIRED","agents":["agent-1"],"ts":"2026-06-23T00:00:10Z"}),
+            // DEADLOCK_DETECTED without agents field → if let Some(arr) false branch
+            json!({"type":"DEADLOCK_DETECTED","ts":"2026-06-23T00:00:11Z"}),
+            // DEADLOCK_DETECTED with non-string element → id.as_str() None branch
+            json!({"type":"DEADLOCK_DETECTED","agents":[42],"ts":"2026-06-23T00:00:12Z"}),
+        ];
+        let s = summarize(&evs);
+        assert_eq!(s.auto_resolved_heat_dropped, 1);
+        assert_eq!(s.user_arbitrated, 1);
+        assert_eq!(s.negotiated_resolved, 1); // CO_OWNERSHIP
+        assert_eq!(s.escalated, 1);
+        assert_eq!(s.heat_updates, 5); // all five HEAT_UPDATED events increment heat_updates
+        assert_eq!(s.deadlocks, 2);     // both DEADLOCK_DETECTED events
+        assert_eq!(s.arbitrations_requested, 1); // still incremented with malformed agents
+        assert_eq!(s.files_touched, 0); // non-string file element skipped
+    }
+
+    #[test]
+    fn profile_save_atomic_zero_counters() {
+        // Agent with sessions=0, heat_generated_count=0 → covers the `else 0.0` branches
+        // in save_atomic's velocity-profiles computation.
+        let dir = std::env::temp_dir().join(format!("cp-{}-{}", std::process::id(), 3));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut store = ProfileStore::default();
+        store.agents.insert("zero-agent".into(), AgentProfile::default());
+        store.save_atomic(&dir).unwrap();
+        let vel: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("velocity-profiles.json")).unwrap()
+        ).unwrap();
+        assert_eq!(vel["zero-agent"]["tasksPerSession"], 0.0);
+        assert_eq!(vel["zero-agent"]["meanHeatGenerated"], 0.0);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 }
