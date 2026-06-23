@@ -80,49 +80,52 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
             confidence,
             ..
         } => {
-            // Agent must exist.
-            {
-                let st = shared.state.lock().unwrap();
-                if st.agent_state(&agent_id).is_none() {
-                    return cap_err(&req.id, CapErrorCode::AgentNotFound);
-                }
-            }
-            let created = {
+            // Existence check + propose + promote under ONE state lock (atomic;
+            // closes the TOCTOU window vs. the reaper). None => agent unknown.
+            let outcome = {
                 let mut st = shared.state.lock().unwrap();
-                st.claims.propose(
-                    &agent_id,
-                    intent.as_str().to_string(),
-                    domains,
-                    estimated_files,
-                    confidence,
-                )
-            };
-            match created {
-                Some(claim) => {
-                    if claim.status == ClaimStatus::Active {
-                        shared.state.lock().unwrap().promote_active(&agent_id);
+                if st.agent_state(&agent_id).is_none() {
+                    None
+                } else {
+                    let created = st.claims.propose(
+                        &agent_id,
+                        intent.as_str().to_string(),
+                        domains,
+                        estimated_files,
+                        confidence,
+                    );
+                    if let Some(ref claim) = created {
+                        if claim.status == ClaimStatus::Active {
+                            st.promote_active(&agent_id);
+                        }
                     }
-                    let log_event = serde_json::json!({
+                    Some(created)
+                }
+            };
+            match outcome {
+                None => cap_err(&req.id, CapErrorCode::AgentNotFound),
+                Some(Some(claim)) => {
+                    let event = serde_json::json!({
                         "type": "CLAIM_CREATED",
                         "claimId": claim.claim_id,
                         "agentId": agent_id,
                         "status": claim.status.as_str(),
                         "ts": crate::bootstrap::now_iso(),
                     });
-                    let _ = shared.log.lock().unwrap().append(&log_event);
+                    let _ = shared.log.lock().unwrap().append(&event);
                     Response::ok_with_data(
                         &req.id,
                         serde_json::json!({"claimId": claim.claim_id, "status": claim.status.as_str()}),
                     )
                 }
-                None => {
-                    let log_event = serde_json::json!({
+                Some(None) => {
+                    let event = serde_json::json!({
                         "type": "CLAIM_REJECTED",
                         "agentId": agent_id,
                         "reason": "LOW_CONFIDENCE",
                         "ts": crate::bootstrap::now_iso(),
                     });
-                    let _ = shared.log.lock().unwrap().append(&log_event);
+                    let _ = shared.log.lock().unwrap().append(&event);
                     Response::ok_with_data(
                         &req.id,
                         serde_json::json!({"status": "REJECTED", "reason": "LOW_CONFIDENCE"}),
@@ -404,7 +407,7 @@ mod tests {
 
     // Target A2: submit_event without cap_version returns UNSUPPORTED_CAP_VERSION (Task 4 routing).
     #[test]
-    fn submit_event_appends_to_log() {
+    fn submit_event_without_cap_version_returns_error() {
         let s = shared_for_test("good");
         // submit_event now routes through handle_cap_event; missing cap_version → error.
         let mut ev_req = req("good", "submit_event");
