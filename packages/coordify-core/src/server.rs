@@ -614,6 +614,35 @@ fn finalize_negotiation(shared: &Shared, c: &Conflict) {
     }
 }
 
+/// Proposal-timeout sweep (§18.6): escalate conflicts that aged out without
+/// both proposals. Snapshot under a short conflict lock, then log — never
+/// nested. Called each reaper tick with the reaper's captured `now`.
+fn sweep_proposal_timeouts(shared: &Shared, now: u64) {
+    let timed: Vec<Conflict> = {
+        let mut cs = shared.conflicts.lock().unwrap();
+        let ids = cs.timed_out(now, shared.conflict_cfg.proposal_timeout_ms);
+        let mut snaps = Vec::new();
+        for id in &ids {
+            cs.set_state(id, ConflictState::AwaitingUserDecision);
+            if let Some(c) = cs.get_by_id(id) {
+                snaps.push(c.clone());
+            }
+        }
+        snaps
+    };
+    if !timed.is_empty() {
+        let mut log = shared.log.lock().unwrap();
+        for c in &timed {
+            let _ = log.append(&serde_json::json!({
+                "type": "CONFLICT_TIMEOUT",
+                "conflictId": c.conflict_id,
+                "ts": crate::bootstrap::now_iso(),
+            }));
+            let _ = log.append(&build_arbitration(c));
+        }
+    }
+}
+
 /// Handle one connection: read newline-delimited requests, reply per line.
 /// When the connecting agent registered, drop it on disconnect and return
 /// whether the network is now empty.
@@ -805,31 +834,7 @@ pub fn spawn_reaper(
             }
         }
 
-        // Proposal-timeout sweep (§18.6): escalate conflicts that aged out
-        // without both proposals. Snapshot under a short conflict lock, then log.
-        let timed: Vec<Conflict> = {
-            let mut cs = shared.conflicts.lock().unwrap();
-            let ids = cs.timed_out(now, shared.conflict_cfg.proposal_timeout_ms);
-            let mut snaps = Vec::new();
-            for id in &ids {
-                cs.set_state(id, ConflictState::AwaitingUserDecision);
-                if let Some(c) = cs.get_by_id(id) {
-                    snaps.push(c.clone());
-                }
-            }
-            snaps
-        };
-        if !timed.is_empty() {
-            let mut log = shared.log.lock().unwrap();
-            for c in &timed {
-                let _ = log.append(&serde_json::json!({
-                    "type": "CONFLICT_TIMEOUT",
-                    "conflictId": c.conflict_id,
-                    "ts": crate::bootstrap::now_iso(),
-                }));
-                let _ = log.append(&build_arbitration(c));
-            }
-        }
+        sweep_proposal_timeouts(&shared, now);
 
         // Empty-network finalize: the last agent leaving ends the session
         // immediately (ARCHITECTURE §15). Note: because the accept loop is
@@ -1196,21 +1201,55 @@ mod tests {
     }
 
     #[test]
+    fn user_decision_resolves_escalated_conflict() {
+        let s = shared_for_test("good");
+        let (a, b, id) = open_conflict_between_two(&s);
+        // Incompatible proposals -> escalate to AwaitingUserDecision.
+        assert!(handle_request(&s, &cap_req("good", proposal_ev(&id, &a, "CO_OWN"))).ok);
+        assert!(handle_request(&s, &cap_req("good", proposal_ev(&id, &b, "SPLIT_SCOPE"))).ok);
+        assert_eq!(s.conflicts.lock().unwrap().open_count(), 1);
+        // User arbitrates -> conflict resolved + removed.
+        let decision = json!({"type":"CONFLICT_USER_DECISION","conflictId":id,"choice":"option-1"});
+        assert!(handle_request(&s, &cap_req("good", decision)).ok);
+        assert_eq!(s.conflicts.lock().unwrap().open_count(), 0);
+    }
+
+    #[test]
+    fn user_decision_unknown_conflict_errors() {
+        let s = shared_for_test("good");
+        let _ = open_conflict_between_two(&s);
+        let resp = handle_request(
+            &s,
+            &cap_req("good", json!({"type":"CONFLICT_USER_DECISION","conflictId":"conflict-999","choice":"x"})),
+        );
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_deref(), Some("CONFLICT_NOT_FOUND"));
+    }
+
+    #[test]
     fn timed_out_conflict_is_escalated() {
         let s = shared_for_test("good");
         let (_a, _b, id) = open_conflict_between_two(&s);
-        // Force the conflict's opened_at_ms far into the past so any timeout fires.
-        {
-            let mut cs = s.conflicts.lock().unwrap();
-            let timed = cs.timed_out(now_ms() + 10_000_000, s.conflict_cfg.proposal_timeout_ms);
-            assert_eq!(timed, vec![id.clone()]);
-            for cid in &timed {
-                cs.set_state(cid, crate::conflict::ConflictState::AwaitingUserDecision);
-            }
-        }
+        // Drive the real reaper sweep in-process with a `now` far past the
+        // timeout so the conflict (no proposals) ages out -> escalated.
+        sweep_proposal_timeouts(&s, now_ms() + 10_000_000);
+        let cs = s.conflicts.lock().unwrap();
+        assert_eq!(cs.open_count(), 1, "timed-out conflict stays open, awaiting the user");
+        assert_eq!(
+            cs.get_by_id(&id).unwrap().state,
+            crate::conflict::ConflictState::AwaitingUserDecision
+        );
+    }
+
+    #[test]
+    fn sweep_is_noop_before_timeout() {
+        let s = shared_for_test("good");
+        let (_a, _b, id) = open_conflict_between_two(&s);
+        // now barely past open: not aged out -> no state change.
+        sweep_proposal_timeouts(&s, now_ms());
         assert_eq!(
             s.conflicts.lock().unwrap().get_by_id(&id).unwrap().state,
-            crate::conflict::ConflictState::AwaitingUserDecision
+            crate::conflict::ConflictState::Detected
         );
     }
 

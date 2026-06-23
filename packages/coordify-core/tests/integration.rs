@@ -93,6 +93,21 @@ fn spawn_core_fast_reaper(tag: &str) -> Spawned {
     Spawned { child, root }
 }
 
+fn spawn_core_fast_proposal_timeout(tag: &str) -> Spawned {
+    let root = temp_root(tag);
+    let child = Command::new(env!("CARGO_BIN_EXE_coordify-core"))
+        .arg("--root")
+        .arg(&root)
+        .env("COORDIFY_REAPER_INTERVAL_MS", "100")
+        .env("COORDIFY_REAPER_TIMEOUT_MS", "60000") // keep agents alive past the proposal timeout
+        .env("COORDIFY_PROPOSAL_TIMEOUT_MS", "200") // conflicts time out fast
+        .spawn()
+        .expect("failed to spawn coordify-core");
+    let sock = root.join(".coordify/runtime/core.sock");
+    assert!(wait_for(&sock, Duration::from_secs(5)), "socket never appeared");
+    Spawned { child, root }
+}
+
 fn send_line(stream: &mut UnixStream, line: &str) -> serde_json::Value {
     stream.write_all(line.as_bytes()).unwrap();
     stream.write_all(b"\n").unwrap();
@@ -755,4 +770,51 @@ fn negotiation_resolves_conflict_over_socket() {
     assert!(log_contents.contains("CONFLICT_OPENED"), "expected CONFLICT_OPENED");
     assert!(log_contents.contains("CONFLICT_PROPOSAL_RECEIVED"), "expected proposals logged");
     assert!(log_contents.contains("PARTICIPANT_STEPPED_ASIDE"), "expected negotiated resolution");
+}
+
+#[test]
+fn reaper_escalates_timed_out_conflict_over_socket() {
+    let core = spawn_core_fast_proposal_timeout("ptmo");
+    let token = read_token(&core.root);
+    let sock = core.root.join(".coordify/runtime/core.sock");
+    let mut stream = connect_retry(&sock);
+
+    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
+    let reg_b = format!(r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
+    let b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
+
+    let mk = |id: &str, agent: &str| format!(
+        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+        id, token, agent
+    );
+    assert_eq!(send_line(&mut stream, &mk("3", &a))["ok"], true);
+    assert_eq!(send_line(&mut stream, &mk("4", &b))["ok"], true); // conflict-1 opens
+
+    // No proposals submitted: the reaper proposal-timeout sweep (§18.6) escalates it.
+    // Keep the connection open (agents alive) while polling the live log.
+    let sessions = core.root.join(".coordify/sessions");
+    let mut log_contents = String::new();
+    let start = std::time::Instant::now();
+    while start.elapsed() < Duration::from_secs(4) {
+        if let Ok(entries) = std::fs::read_dir(&sessions) {
+            for e in entries.flatten() {
+                let log = e.path().join("events.log");
+                if log.exists() {
+                    log_contents = std::fs::read_to_string(log).unwrap();
+                }
+            }
+        }
+        // Poll on the LAST event the sweep emits: CONFLICT_TIMEOUT and
+        // USER_ARBITRATION_REQUIRED are two separate appends, so reading on the
+        // first risks a mid-write snapshot missing the second.
+        if log_contents.contains("USER_ARBITRATION_REQUIRED") {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(50));
+    }
+    drop(stream);
+    assert!(log_contents.contains("CONFLICT_OPENED"), "expected CONFLICT_OPENED");
+    assert!(log_contents.contains("CONFLICT_TIMEOUT"), "expected CONFLICT_TIMEOUT from reaper sweep:\n{log_contents}");
+    assert!(log_contents.contains("USER_ARBITRATION_REQUIRED"), "expected arbitration after timeout");
 }
