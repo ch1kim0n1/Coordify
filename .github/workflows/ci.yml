@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# Coordify Core (Rust) lives in packages/coordify-core. This job lints, tests,
+# and enforces a line-coverage floor so coverage cannot silently rot as the
+# codebase grows (Phases 2-6). Raise --fail-under-lines as coverage improves;
+# current floor is well below the measured ~96%.
+jobs:
+  coordify-core:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/coordify-core
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, llvm-tools-preview
+
+      - name: Install cargo-llvm-cov
+        uses: taiki-e/install-action@cargo-llvm-cov
+
+      - name: Cache cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            packages/coordify-core/target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('packages/coordify-core/Cargo.lock') }}
+
+      - name: Clippy (deny warnings)
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Tests + coverage gate
+        run: cargo llvm-cov --fail-under-lines 90 -- --test-threads=4
