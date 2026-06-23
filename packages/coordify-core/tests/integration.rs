@@ -857,6 +857,7 @@ fn file_touched_over_socket_raises_heat() {
     }
     assert!(log.contains("FILE_TOUCHED"), "FILE_TOUCHED logged");
     assert!(log.contains("src/auth/session.ts"), "touched file in log:\n{log}");
+    assert!(log.contains("HEAT_UPDATED"), "FILE_TOUCHED should trigger heat recompute:\n{log}");
 }
 
 #[test]

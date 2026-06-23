@@ -1369,11 +1369,13 @@ mod tests {
         let cb = json!({"type":"CLAIM_PROPOSED","agentId":b,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/b.rs"],"task":{"summary":"beta work"},"confidence":0.9});
         assert!(handle_request(&s, &cap_req("good", ca)).ok);
         assert!(handle_request(&s, &cap_req("good", cb)).ok);
+        // Heat from the disjoint-file claims, BEFORE any file overlap.
+        let before = s.heat.lock().unwrap().get(&a, &b).expect("edge exists").heat;
         // Both touch the SAME file -> overlap heat rises.
         assert!(handle_request(&s, &cap_req("good", json!({"type":"FILE_TOUCHED","agentId":a,"files":["src/shared.rs","src/a.rs"]}))).ok);
         assert!(handle_request(&s, &cap_req("good", json!({"type":"FILE_TOUCHED","agentId":b,"files":["src/shared.rs"]}))).ok);
-        let edge = s.heat.lock().unwrap().get(&a, &b).expect("edge exists").heat;
-        assert!(edge > 25, "shared touched file should raise heat, got {edge}");
+        let after = s.heat.lock().unwrap().get(&a, &b).expect("edge exists").heat;
+        assert!(after > before, "shared touched file must raise heat: before={before} after={after}");
         // a touched two files together -> they couple.
         assert!(s.knowledge.lock().unwrap().coupling_count("src/shared.rs", "src/a.rs") >= 1);
     }
