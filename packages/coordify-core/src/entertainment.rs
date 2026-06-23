@@ -830,4 +830,27 @@ mod tests {
         assert!(e.badges.is_empty());
         assert_eq!(e.streaks.longest_auto_resolve_streak, 0);
     }
+
+    #[test]
+    fn multi_spike_and_multi_conflict_hits_some_arms() {
+        // 3 HEAT_UPDATED on the same pair → two spikes; second spike (50) beats first (20)
+        // → exercises the Some(d) => delta > *d arm of biggest_spike
+        // 2 CONFLICT_OPENED/RESOLVED → second conflict spans longer (3000ms vs 1000ms)
+        // → exercises the Some((_, max_ms)) => span > *max_ms arm of longest_neg
+        let evs = vec![
+            json!({"type":"HEAT_UPDATED","pair":["a","b"],"heat":10,"band":"SAFE","ts":"2026-06-23T00:00:00Z"}),
+            json!({"type":"HEAT_UPDATED","pair":["a","b"],"heat":30,"band":"MONITOR","ts":"2026-06-23T00:00:01Z"}),   // spike delta=20
+            json!({"type":"HEAT_UPDATED","pair":["a","b"],"heat":80,"band":"CONFLICT_CANDIDATE","ts":"2026-06-23T00:00:02Z"}), // spike delta=50 → new max
+            json!({"type":"CONFLICT_OPENED","conflictId":"c-1","agents":["a","b"],"paths":[],"ts":"2026-06-23T00:00:03Z"}),
+            json!({"type":"CONFLICT_RESOLVED","conflictId":"c-1","resolution":"PARTICIPANT_STEPPED_ASIDE","ts":"2026-06-23T00:00:04Z"}), // span=1000ms
+            json!({"type":"CONFLICT_OPENED","conflictId":"c-2","agents":["a","b"],"paths":[],"ts":"2026-06-23T00:00:05Z"}),
+            json!({"type":"CONFLICT_RESOLVED","conflictId":"c-2","resolution":"PARTICIPANT_STEPPED_ASIDE","ts":"2026-06-23T00:00:08Z"}), // span=3000ms → new max
+        ];
+        let stats = crate::stats::summarize(&evs);
+        let e = build_entertainment(&evs, &stats);
+        let spike = e.superlatives.iter().find(|s| s.key == "biggest_spike").unwrap();
+        assert_eq!(spike.value["delta"], 50);
+        let neg = e.superlatives.iter().find(|s| s.key == "longest_negotiation").unwrap();
+        assert_eq!(neg.value["ms"], 3000);
+    }
 }

@@ -395,6 +395,32 @@ mod tests {
         assert!(doc["knowledgeSnapshot"].is_object());
     }
 
+    #[test]
+    fn summarize_rare_event_types() {
+        let evs = vec![
+            json!({"type":"CLAIM_REJECTED","agentId":"agent-1","ts":"2026-06-23T00:00:00Z"}),
+            json!({"type":"CONFLICT_TIMEOUT","conflictId":"c-1","ts":"2026-06-23T00:00:01Z"}),
+            json!({"type":"CONFLICT_ABORTED","conflictId":"c-2","reason":"TIMEOUT","ts":"2026-06-23T00:00:02Z"}),
+            json!({"type":"USER_ARBITRATION_REQUIRED","agents":["agent-1","agent-2"],"ts":"2026-06-23T00:00:03Z"}),
+            json!({"type":"DEADLOCK_DETECTED","agents":["agent-1","agent-2","agent-3"],"ts":"2026-06-23T00:00:04Z"}),
+        ];
+        let s = summarize(&evs);
+        assert_eq!(s.claims_rejected, 1);
+        assert_eq!(s.timed_out, 1);
+        assert_eq!(s.aborted, 1);
+        assert_eq!(s.arbitrations_requested, 1);
+        assert_eq!(s.deadlocks, 1);
+        let a1 = s.agents.get("agent-1").unwrap();
+        assert_eq!(a1.arbitrations_involved, 1);
+        assert_eq!(a1.deadlocks_involved, 1);
+        let a2 = s.agents.get("agent-2").unwrap();
+        assert_eq!(a2.arbitrations_involved, 1);
+        assert_eq!(a2.deadlocks_involved, 1);
+        let a3 = s.agents.get("agent-3").unwrap();
+        assert_eq!(a3.deadlocks_involved, 1);
+        assert_eq!(a3.arbitrations_involved, 0);
+    }
+
     // Suppress unused-import warning for `ev` helper (used as a no-op wrapper
     // in case the brief's tests use it directly).
     #[allow(dead_code)]
