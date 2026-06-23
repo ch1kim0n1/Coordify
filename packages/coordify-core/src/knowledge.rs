@@ -237,11 +237,14 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut s = KnowledgeStore::new();
         s.record_conflict(&["a".into()]);
+        s.record_claim_files(&["a".into(), "b".into()]); // coupling (a,b) count 1
         s.save_atomic(&dir).unwrap();          // first write, no prev
         let mut s2 = KnowledgeStore::new();
         s2.record_conflict(&["a".into()]);
         s2.record_conflict(&["a".into()]);      // count 2
-        s2.save_atomic(&dir).unwrap();          // rotates prior (count 1) to .prev
+        s2.record_claim_files(&["a".into(), "b".into()]);
+        s2.record_claim_files(&["a".into(), "b".into()]); // coupling (a,b) count 2
+        s2.save_atomic(&dir).unwrap();          // rotates prior (counts 1) to .prev
         assert!(dir.join("hotzones.json.prev").exists());
         let prev: HashMap<String, u64> =
             serde_json::from_str(&std::fs::read_to_string(dir.join("hotzones.json.prev")).unwrap()).unwrap();
@@ -249,6 +252,14 @@ mod tests {
         let cur: HashMap<String, u64> =
             serde_json::from_str(&std::fs::read_to_string(dir.join("hotzones.json")).unwrap()).unwrap();
         assert_eq!(cur.get("a").copied(), Some(2));
+        // coupling-graph rotates too (substring assertions on pretty JSON to
+        // avoid needing the private CouplingEdge type)
+        assert!(dir.join("coupling-graph.json.prev").exists());
+        let cp_prev =
+            std::fs::read_to_string(dir.join("coupling-graph.json.prev")).unwrap();
+        assert!(cp_prev.contains("\"count\": 1"));
+        let cp_cur = std::fs::read_to_string(dir.join("coupling-graph.json")).unwrap();
+        assert!(cp_cur.contains("\"count\": 2"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
