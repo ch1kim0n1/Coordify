@@ -86,4 +86,39 @@ mod tests {
         assert!(!paths.pid().exists());
         let _ = fs::remove_dir_all(&root);
     }
+
+    // Target D7: create_session fails when the sessions directory cannot be created
+    // because a regular file sits in the path that would need to become a directory.
+    #[test]
+    fn create_session_fails_when_parent_is_a_file() {
+        let mut base = std::env::temp_dir();
+        base.push(format!("coordify-session-parentfile-{}", std::process::id()));
+        let _ = fs::remove_file(&base);
+        let _ = fs::remove_dir_all(&base);
+        // Write a plain file at `base`.  Paths::new will resolve sessions() as
+        // base/.coordify/sessions — but create_dir_all must traverse `base` as
+        // a directory, so placing a file there makes it fail.
+        fs::write(&base, b"I am a file").unwrap();
+        // Build a Paths whose root == base (which is a file, not a dir).
+        let paths = Paths::new(&base);
+        let result = create_session(&paths, "2026-06-22_00-00-00".to_string());
+        assert!(result.is_err(), "expected Err when sessions dir cannot be created");
+        let _ = fs::remove_file(&base);
+    }
+
+    // Target D8: finalize fails when the session dir does not exist.
+    #[test]
+    fn finalize_fails_when_session_dir_missing() {
+        let root = temp_root("fin-nodir");
+        let paths = Paths::new(&root);
+        // Construct a Session pointing at a directory that was never created.
+        let ghost_dir = root.join("ghost").join("deep").join("nonexistent");
+        let session = Session {
+            id: "ghost-session".to_string(),
+            dir: ghost_dir,
+        };
+        let result = finalize(&session, &paths, 1);
+        assert!(result.is_err(), "expected Err when session dir does not exist");
+        let _ = fs::remove_dir_all(&root);
+    }
 }

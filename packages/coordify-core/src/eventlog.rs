@@ -68,4 +68,20 @@ mod tests {
         assert_eq!(contents.lines().count(), 2);
         let _ = fs::remove_dir_all(path.parent().unwrap());
     }
+
+    // Target C6: create fails when the parent path is a file (create_dir_all errors).
+    #[test]
+    fn create_fails_when_parent_is_a_file() {
+        let mut base = std::env::temp_dir();
+        base.push(format!("coordify-elog-parentfile-{}", std::process::id()));
+        let _ = fs::remove_file(&base);
+        let _ = fs::remove_dir_all(&base);
+        // Write a regular file at `base` so that joining a child path underneath
+        // it causes create_dir_all to fail (cannot mkdir through a plain file).
+        fs::write(&base, b"I am a file").unwrap();
+        let log_path = base.join("events.log");
+        let result = EventLog::create(log_path);
+        assert!(result.is_err(), "expected Err when parent path is a file");
+        let _ = fs::remove_file(&base);
+    }
 }
