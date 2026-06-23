@@ -12,3 +12,5 @@ pub mod session;
 pub mod server;
 pub mod waitgraph;
 pub mod knowledge;
+pub mod stats;
+pub mod entertainment;

@@ -1,6 +1,6 @@
 use crate::heat::Knowledge;
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 
 /// Ordered key so (a,b) and (b,a) map to the same coupling entry.
@@ -91,6 +91,27 @@ impl KnowledgeStore {
         }
     }
 
+    /// JSON-portable view of the knowledge for the session summary:
+    /// { "hotzones": {path: score}, "coupling": [{a,b,score}] }, scores = n/(n+k).
+    pub fn summary_json(&self, k: f64) -> serde_json::Value {
+        let score = |n: u64| (n as f64) / (n as f64 + k);
+        let hotzones: BTreeMap<&String, f64> =
+            self.hotzone_counts.iter().map(|(p, &n)| (p, score(n))).collect();
+        let mut coupling: Vec<serde_json::Value> = self
+            .coupling_counts
+            .iter()
+            .map(|((a, b), &n)| serde_json::json!({ "a": a, "b": b, "score": score(n) }))
+            .collect();
+        coupling.sort_by(|x, y| {
+            let xa = x["a"].as_str().unwrap_or("");
+            let xb = x["b"].as_str().unwrap_or("");
+            let ya = y["a"].as_str().unwrap_or("");
+            let yb = y["b"].as_str().unwrap_or("");
+            (xa, xb).cmp(&(ya, yb))
+        });
+        serde_json::json!({ "hotzones": hotzones, "coupling": coupling })
+    }
+
     pub fn hotzone_count(&self, path: &str) -> u64 {
         self.hotzone_counts.get(path).copied().unwrap_or(0)
     }
@@ -156,7 +177,7 @@ impl KnowledgeStore {
     }
 }
 
-fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
+pub(crate) fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     if path.exists() {
         // Rotate the last-good file to .prev (best-effort).
         let _ = std::fs::rename(path, with_suffix(path, ".prev"));
@@ -167,7 +188,7 @@ fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
     Ok(())
 }
 
-fn quarantine(path: &Path, out: &mut Vec<String>) {
+pub(crate) fn quarantine(path: &Path, out: &mut Vec<String>) {
     let dir = path.parent().map(|p| p.join("quarantine"));
     if let Some(qdir) = dir {
         let _ = std::fs::create_dir_all(&qdir);
