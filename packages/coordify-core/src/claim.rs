@@ -65,14 +65,20 @@ impl ClaimStore {
         Some(claim)
     }
 
-    /// Mark a single claim RELEASED. Returns false if the claim does not exist.
+    /// Mark a single claim RELEASED. Returns false if the claim does not exist
+    /// or is not in a live state (Proposed/Provisional/Active).
     pub fn release(&mut self, claim_id: &str) -> bool {
         match self.claims.get_mut(claim_id) {
-            Some(c) => {
+            Some(c)
+                if matches!(
+                    c.status,
+                    ClaimStatus::Proposed | ClaimStatus::Provisional | ClaimStatus::Active
+                ) =>
+            {
                 c.status = ClaimStatus::Released;
                 true
             }
-            None => false,
+            _ => false,
         }
     }
 
@@ -187,6 +193,18 @@ mod tests {
         let released = s.release_for_agent("agent-2");
         assert_eq!(released.len(), 2);
         assert_eq!(s.get(&a.claim_id).unwrap().status, ClaimStatus::Released);
+    }
+
+    #[test]
+    fn release_only_succeeds_on_live_claim() {
+        let mut s = ClaimStore::new();
+        let c = s.propose("agent-1", "BUGFIX".into(), vec![], vec![], 0.9).unwrap();
+        assert!(s.release(&c.claim_id)); // Active -> Released: ok
+        assert!(!s.release(&c.claim_id)); // already Released: no-op, false
+        // Orphaned claim cannot be released either.
+        let d = s.propose("agent-2", "QA".into(), vec![], vec![], 0.9).unwrap();
+        s.orphan_for_agent("agent-2", 1_000);
+        assert!(!s.release(&d.claim_id));
     }
 
     #[test]
