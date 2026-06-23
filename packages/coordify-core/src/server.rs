@@ -341,6 +341,18 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
         None => {
             // No live claim: drop this agent's edges.
             shared.heat.lock().unwrap().remove_agent(agent_id);
+            let aborted = shared.conflicts.lock().unwrap().abort_for_agent(agent_id);
+            if !aborted.is_empty() {
+                let mut log = shared.log.lock().unwrap();
+                for c in &aborted {
+                    let _ = log.append(&serde_json::json!({
+                        "type": "CONFLICT_ABORTED",
+                        "conflictId": c.conflict_id,
+                        "reason": "PARTICIPANT_LEFT",
+                        "ts": crate::bootstrap::now_iso(),
+                    }));
+                }
+            }
             return;
         }
     };
@@ -870,6 +882,22 @@ mod tests {
         // release a claim that doesn't exist
         let resp = handle_request(&s, &cap_req("good", json!({"type":"CLAIM_RELEASED","claimId":"claim-404","agentId":"a","reason":"TASK_COMPLETED"})));
         assert_eq!(resp.error.as_deref(), Some("CLAIM_NOT_FOUND"));
+    }
+
+    #[test]
+    fn releasing_a_participant_aborts_the_conflict() {
+        let s = shared_for_test("good");
+        let a = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let b = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let mk = |agent: &str| json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{"summary":"fix session expiry"},"confidence":0.9});
+        assert!(handle_request(&s, &cap_req("good", mk(&a))).ok);
+        let rb = handle_request(&s, &cap_req("good", mk(&b)));
+        let b_claim = rb.data.unwrap()["claimId"].as_str().unwrap().to_string();
+        assert_eq!(s.conflicts.lock().unwrap().open_count(), 1);
+        // Release b's claim -> b has no live claim -> conflict aborted.
+        let release = json!({"type":"CLAIM_RELEASED","claimId":b_claim,"agentId":b,"reason":"TASK_COMPLETED"});
+        assert!(handle_request(&s, &cap_req("good", release)).ok);
+        assert_eq!(s.conflicts.lock().unwrap().open_count(), 0);
     }
 
     #[test]
