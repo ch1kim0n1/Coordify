@@ -8,7 +8,7 @@
 db-path = "~/.cargo/advisory-dbs"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 vulnerability = "deny"
-unmaintained = "warn"
+unmaintained = "workspace"
 yanked = "deny"
 notice = "warn"
 
@@ -39,4 +39,4 @@ highlight = "all"
 [sources]
 # Only allow crates from crates.io. No private/git registries.
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-deny-git = true
+unknown-git = "deny"
