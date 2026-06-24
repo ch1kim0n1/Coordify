@@ -1,14 +1,14 @@
 use crate::cap::{self, CapErrorCode, CapEvent, ClaimStatus, ProposalKind};
 use crate::conflict::{compare, Conflict, ConflictConfig, ConflictState, ConflictStore, Decision};
-use crate::waitgraph::WaitGraph;
 use crate::eventlog::EventLog;
 use crate::heat::{self, HeatBand, HeatConfig};
-use crate::knowledge::KnowledgeStore;
 use crate::heatstore::HeatStore;
 use crate::ipc::{decode_request, encode_response, Request, Response};
+use crate::knowledge::KnowledgeStore;
 use crate::paths::Paths;
 use crate::session::{finalize, Session};
 use crate::state::{now_ms, State, StateError};
+use crate::waitgraph::WaitGraph;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
@@ -77,33 +77,49 @@ pub fn handle_request(shared: &Shared, req: &Request) -> Response {
                     let claim_id = st.claims.live_claim_for(&id).map(|c| c.claim_id.clone());
                     serde_json::json!({ "agentId": id, "state": state_val, "claimId": claim_id })
                 }).collect::<Vec<_>>();
-                let claims = st.claims.all_active().map(|c| serde_json::json!({
-                    "claimId": c.claim_id,
-                    "agentId": c.agent_id,
-                    "files": c.actual_files.iter().chain(c.estimated_files.iter())
-                                .collect::<std::collections::BTreeSet<_>>()
-                })).collect::<Vec<_>>();
+                let claims = st
+                    .claims
+                    .all_active()
+                    .map(|c| {
+                        serde_json::json!({
+                            "claimId": c.claim_id,
+                            "agentId": c.agent_id,
+                            "files": c.actual_files.iter().chain(c.estimated_files.iter())
+                                        .collect::<std::collections::BTreeSet<_>>()
+                        })
+                    })
+                    .collect::<Vec<_>>();
                 (agents, claims)
             };
             let heat_json = shared.heat.lock().unwrap().snapshot();
             let conflicts_json = {
-                shared.conflicts.lock().unwrap().all_open().iter().map(|c| {
-                    let age_ms = now_ms().saturating_sub(c.opened_at_ms);
-                    serde_json::json!({
-                        "conflictId": c.conflict_id,
-                        "agents": [c.agents.0, c.agents.1],
-                        "paths": c.paths,
-                        "state": c.state.as_str(),
-                        "ageMs": age_ms
+                shared
+                    .conflicts
+                    .lock()
+                    .unwrap()
+                    .all_open()
+                    .iter()
+                    .map(|c| {
+                        let age_ms = now_ms().saturating_sub(c.opened_at_ms);
+                        serde_json::json!({
+                            "conflictId": c.conflict_id,
+                            "agents": [c.agents.0, c.agents.1],
+                            "paths": c.paths,
+                            "state": c.state.as_str(),
+                            "ageMs": age_ms
+                        })
                     })
-                }).collect::<Vec<_>>()
+                    .collect::<Vec<_>>()
             };
-            Response::ok_with_data(&req.id, serde_json::json!({
-                "agents": agents_json,
-                "claims": claims_json,
-                "heat": heat_json,
-                "conflicts": conflicts_json
-            }))
+            Response::ok_with_data(
+                &req.id,
+                serde_json::json!({
+                    "agents": agents_json,
+                    "claims": claims_json,
+                    "heat": heat_json,
+                    "conflicts": conflicts_json
+                }),
+            )
         }
         _ => Response::err(&req.id, "unknown action"),
     }
@@ -143,15 +159,16 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
             // Build inputs for the PROPOSED claim to forecast heat before accepting.
             let proposed_inputs = {
                 let st = shared.state.lock().unwrap();
-                st.agents_get_branch_and_seen(&agent_id).map(|(branch, last_seen)| heat::HeatInputs {
-                    agent_id: agent_id.clone(),
-                    intent: intent.as_str().to_string(),
-                    domains: domains.iter().cloned().collect(),
-                    files: estimated_files.iter().cloned().collect(),
-                    task_tokens: heat::tokens(&task_summary),
-                    last_seen_ms: last_seen,
-                    branch,
-                })
+                st.agents_get_branch_and_seen(&agent_id)
+                    .map(|(branch, last_seen)| heat::HeatInputs {
+                        agent_id: agent_id.clone(),
+                        intent: intent.as_str().to_string(),
+                        domains: domains.iter().cloned().collect(),
+                        files: estimated_files.iter().cloned().collect(),
+                        task_tokens: heat::tokens(&task_summary),
+                        last_seen_ms: last_seen,
+                        branch,
+                    })
             };
             let mut recommendation = "PROCEED".to_string();
             if let Some(ref pinputs) = proposed_inputs {
@@ -161,12 +178,14 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                 }
                 let edges_json: Vec<serde_json::Value> = edges
                     .iter()
-                    .map(|e| serde_json::json!({
-                        "pair": [e.pair.0, e.pair.1],
-                        "heat": e.heat,
-                        "band": e.band.as_str(),
-                        "reasons": e.reasons,
-                    }))
+                    .map(|e| {
+                        serde_json::json!({
+                            "pair": [e.pair.0, e.pair.1],
+                            "heat": e.heat,
+                            "band": e.band.as_str(),
+                            "reasons": e.reasons,
+                        })
+                    })
                     .collect();
                 let _ = shared.log.lock().unwrap().append(&serde_json::json!({
                     "type": "PREDICTED_HEAT_CALCULATED",
@@ -213,7 +232,11 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                     let _ = shared.log.lock().unwrap().append(&event);
                     recompute_current_heat(shared, &agent_id);
                     if claim_files.len() >= 2 {
-                        shared.knowledge.lock().unwrap().record_claim_files(&claim_files);
+                        shared
+                            .knowledge
+                            .lock()
+                            .unwrap()
+                            .record_claim_files(&claim_files);
                     }
                     Response::ok_with_data(
                         &req.id,
@@ -239,7 +262,11 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                 }
             }
         }
-        CapEvent::ClaimReleased { claim_id, agent_id, reason } => {
+        CapEvent::ClaimReleased {
+            claim_id,
+            agent_id,
+            reason,
+        } => {
             let released = {
                 let mut st = shared.state.lock().unwrap();
                 st.claims.release(&claim_id)
@@ -322,7 +349,11 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
             recompute_current_heat(shared, &agent_id);
             Response::ok_with_data(&req.id, serde_json::json!({"generation": generation}))
         }
-        CapEvent::ConflictProposalSubmitted { conflict_id, from, proposal } => {
+        CapEvent::ConflictProposalSubmitted {
+            conflict_id,
+            from,
+            proposal,
+        } => {
             let recorded = {
                 let mut cs = shared.conflicts.lock().unwrap();
                 cs.record_proposal(&conflict_id, &from, proposal.clone())
@@ -354,7 +385,10 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
             }
             Response::ok_for(&req.id)
         }
-        CapEvent::ConflictUserDecision { conflict_id, choice } => {
+        CapEvent::ConflictUserDecision {
+            conflict_id,
+            choice,
+        } => {
             let resolved = {
                 let mut cs = shared.conflicts.lock().unwrap();
                 cs.resolve_by_id(&conflict_id)
@@ -414,7 +448,11 @@ fn handle_cap_event(shared: &Shared, req: &Request) -> Response {
                         .unwrap_or_default()
                 };
                 if all_files.len() >= 2 {
-                    shared.knowledge.lock().unwrap().record_cotouch(&all_files, &new_files);
+                    shared
+                        .knowledge
+                        .lock()
+                        .unwrap()
+                        .record_cotouch(&all_files, &new_files);
                 }
             }
             Response::ok_for(&req.id)
@@ -431,7 +469,11 @@ struct PredictedEdge {
 
 /// Predicted heat of a proposed claim's inputs vs existing registered agents with live claims.
 fn predicted_heat(shared: &Shared, proposed: &heat::HeatInputs) -> Vec<PredictedEdge> {
-    let knowledge = shared.knowledge.lock().unwrap().snapshot(shared.knowledge_k);
+    let knowledge = shared
+        .knowledge
+        .lock()
+        .unwrap()
+        .snapshot(shared.knowledge_k);
     let others = {
         let st = shared.state.lock().unwrap();
         st.agent_ids()
@@ -504,7 +546,11 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
     };
 
     // Snapshot knowledge (scores) under a short lock for the pure compute.
-    let knowledge = shared.knowledge.lock().unwrap().snapshot(shared.knowledge_k);
+    let knowledge = shared
+        .knowledge
+        .lock()
+        .unwrap()
+        .snapshot(shared.knowledge_k);
 
     // Compute (pure). Keep each other's inputs for conflict metadata.
     let mut updates: Vec<(heat::HeatInputs, heat::HeatResult)> = Vec::new();
@@ -532,7 +578,15 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
                     let domains: Vec<String> =
                         mine.domains.union(&other.domains).cloned().collect();
                     let intents = vec![mine.intent.clone(), other.intent.clone()];
-                    if let Some(c) = cstore.open(agent_id, other_id, result.heat, now_ms(), paths, domains, intents) {
+                    if let Some(c) = cstore.open(
+                        agent_id,
+                        other_id,
+                        result.heat,
+                        now_ms(),
+                        paths,
+                        domains,
+                        intents,
+                    ) {
                         accrue_paths.push(c.paths.clone());
                         let ts = crate::bootstrap::now_iso();
                         conflict_events.push(serde_json::json!({
@@ -571,7 +625,8 @@ fn recompute_current_heat(shared: &Shared, agent_id: &str) {
     {
         let mut log = shared.log.lock().unwrap();
         for (other, result) in &updates {
-            let components = serde_json::to_value(&result.components).unwrap_or(serde_json::Value::Null);
+            let components =
+                serde_json::to_value(&result.components).unwrap_or(serde_json::Value::Null);
             let _ = log.append(&serde_json::json!({
                 "type": "HEAT_UPDATED",
                 "pair": [agent_id, other.agent_id],
@@ -754,11 +809,13 @@ fn persist_stats(shared: &Shared, session: &Session, paths: &Paths) {
         )?;
         crate::knowledge::write_atomic(
             &session.dir.join("session-summary.json"),
-            &serde_json::to_string_pretty(&stats.to_summary(&ent.narrative, snapshot)).unwrap_or_else(|_| "{}".into()),
+            &serde_json::to_string_pretty(&stats.to_summary(&ent.narrative, snapshot))
+                .unwrap_or_else(|_| "{}".into()),
         )?;
         crate::knowledge::write_atomic(
             &session.dir.join("heat-history.json"),
-            &serde_json::to_string_pretty(&crate::stats::heat_history(&events)).unwrap_or_else(|_| "[]".into()),
+            &serde_json::to_string_pretty(&crate::stats::heat_history(&events))
+                .unwrap_or_else(|_| "[]".into()),
         )?;
         crate::knowledge::write_atomic(
             &session.dir.join("entertainment.json"),
@@ -892,7 +949,10 @@ pub fn run(
         .ok()
         .and_then(|v| v.parse().ok())
         .unwrap_or(60_000);
-    let conflict_cfg = ConflictConfig { proposal_timeout_ms, ..ConflictConfig::default() };
+    let conflict_cfg = ConflictConfig {
+        proposal_timeout_ms,
+        ..ConflictConfig::default()
+    };
 
     let knowledge_k = std::env::var("COORDIFY_KNOWLEDGE_K")
         .ok()
@@ -943,8 +1003,12 @@ pub fn run(
         // Phase 2 replaces this with a shared reaper-driven shutdown signal.
         if let Ok(network_empty) = handle.join() {
             let seen = *shared.agents_seen.lock().unwrap();
-            if network_empty && seen > 0
-                && shared.finalized.compare_exchange(false, true, SeqCst, SeqCst).is_ok()
+            if network_empty
+                && seen > 0
+                && shared
+                    .finalized
+                    .compare_exchange(false, true, SeqCst, SeqCst)
+                    .is_ok()
             {
                 persist_knowledge(&shared, &paths);
                 persist_stats(&shared, &session, &paths);
@@ -1028,7 +1092,10 @@ pub fn spawn_reaper(
         let seen = *shared.agents_seen.lock().unwrap();
         if empty
             && seen > 0
-            && shared.finalized.compare_exchange(false, true, SeqCst, SeqCst).is_ok()
+            && shared
+                .finalized
+                .compare_exchange(false, true, SeqCst, SeqCst)
+                .is_ok()
         {
             persist_knowledge(&shared, &paths);
             persist_stats(&shared, &session, &paths);
@@ -1047,8 +1114,11 @@ mod tests {
 
     fn shared_for_test(token: &str) -> Arc<Shared> {
         let mut dir = std::env::temp_dir();
-        dir.push(format!("coordify-srv-{}-{}", std::process::id(),
-            TEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)));
+        dir.push(format!(
+            "coordify-srv-{}-{}",
+            std::process::id(),
+            TEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let log = EventLog::create(dir.join("events.log")).unwrap();
@@ -1168,13 +1238,19 @@ mod tests {
         let agent = reg.agent_id.unwrap();
         let resp = handle_request(
             &s,
-            &cap_req("good", json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","confidence":0.9})),
+            &cap_req(
+                "good",
+                json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","confidence":0.9}),
+            ),
         );
         assert!(resp.ok);
         let data = resp.data.unwrap();
         assert_eq!(data["status"], "ACTIVE");
         assert!(data["claimId"].as_str().unwrap().starts_with("claim-"));
-        assert_eq!(s.state.lock().unwrap().agent_state(&agent), Some(crate::cap::AgentState::Active));
+        assert_eq!(
+            s.state.lock().unwrap().agent_state(&agent),
+            Some(crate::cap::AgentState::Active)
+        );
     }
 
     #[test]
@@ -1184,12 +1260,18 @@ mod tests {
         let agent = reg.agent_id.unwrap();
         let resp = handle_request(
             &s,
-            &cap_req("good", json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","confidence":0.1})),
+            &cap_req(
+                "good",
+                json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","confidence":0.1}),
+            ),
         );
         assert!(resp.ok);
         assert_eq!(resp.data.unwrap()["status"], "REJECTED");
         // Agent stays DISCOVERY.
-        assert_eq!(s.state.lock().unwrap().agent_state(&agent), Some(crate::cap::AgentState::Discovery));
+        assert_eq!(
+            s.state.lock().unwrap().agent_state(&agent),
+            Some(crate::cap::AgentState::Discovery)
+        );
     }
 
     #[test]
@@ -1197,7 +1279,10 @@ mod tests {
         let s = shared_for_test("good");
         let resp = handle_request(
             &s,
-            &cap_req("good", json!({"type":"CLAIM_PROPOSED","agentId":"agent-404","intent":"BUGFIX","confidence":0.9})),
+            &cap_req(
+                "good",
+                json!({"type":"CLAIM_PROPOSED","agentId":"agent-404","intent":"BUGFIX","confidence":0.9}),
+            ),
         );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("AGENT_NOT_FOUND"));
@@ -1206,38 +1291,93 @@ mod tests {
     #[test]
     fn agent_state_changed_valid_and_invalid() {
         let s = shared_for_test("good");
-        let agent = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        let agent = handle_request(&s, &req("good", "register"))
+            .agent_id
+            .unwrap();
         // Discovery -> Active ok
-        let ok = handle_request(&s, &cap_req("good", json!({"type":"AGENT_STATE_CHANGED","agentId":agent,"state":"ACTIVE"})));
+        let ok = handle_request(
+            &s,
+            &cap_req(
+                "good",
+                json!({"type":"AGENT_STATE_CHANGED","agentId":agent,"state":"ACTIVE"}),
+            ),
+        );
         assert!(ok.ok);
         // Active -> SUBAGENT_WAITING ok; then SUBAGENT_WAITING -> TESTING is invalid
-        assert!(handle_request(&s, &cap_req("good", json!({"type":"AGENT_STATE_CHANGED","agentId":agent,"state":"SUBAGENT_WAITING"}))).ok);
-        let bad = handle_request(&s, &cap_req("good", json!({"type":"AGENT_STATE_CHANGED","agentId":agent,"state":"TESTING"})));
+        assert!(
+            handle_request(
+                &s,
+                &cap_req(
+                    "good",
+                    json!({"type":"AGENT_STATE_CHANGED","agentId":agent,"state":"SUBAGENT_WAITING"})
+                )
+            )
+            .ok
+        );
+        let bad = handle_request(
+            &s,
+            &cap_req(
+                "good",
+                json!({"type":"AGENT_STATE_CHANGED","agentId":agent,"state":"TESTING"}),
+            ),
+        );
         assert_eq!(bad.error.as_deref(), Some("INVALID_STATE_TRANSITION"));
         // unknown agent
-        let nf = handle_request(&s, &cap_req("good", json!({"type":"AGENT_STATE_CHANGED","agentId":"agent-404","state":"IDLE"})));
+        let nf = handle_request(
+            &s,
+            &cap_req(
+                "good",
+                json!({"type":"AGENT_STATE_CHANGED","agentId":"agent-404","state":"IDLE"}),
+            ),
+        );
         assert_eq!(nf.error.as_deref(), Some("AGENT_NOT_FOUND"));
     }
 
     #[test]
     fn clear_invoked_releases_claims_and_bumps_generation() {
         let s = shared_for_test("good");
-        let agent = handle_request(&s, &req("good", "register")).agent_id.unwrap();
-        let propose = handle_request(&s, &cap_req("good", json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","confidence":0.9})));
-        let claim_id = propose.data.unwrap()["claimId"].as_str().unwrap().to_string();
+        let agent = handle_request(&s, &req("good", "register"))
+            .agent_id
+            .unwrap();
+        let propose = handle_request(
+            &s,
+            &cap_req(
+                "good",
+                json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","confidence":0.9}),
+            ),
+        );
+        let claim_id = propose.data.unwrap()["claimId"]
+            .as_str()
+            .unwrap()
+            .to_string();
 
-        let resp = handle_request(&s, &cap_req("good", json!({"type":"CLEAR_INVOKED","agentId":agent})));
+        let resp = handle_request(
+            &s,
+            &cap_req("good", json!({"type":"CLEAR_INVOKED","agentId":agent})),
+        );
         assert!(resp.ok);
         assert_eq!(resp.data.unwrap()["generation"], 2);
         let st = s.state.lock().unwrap();
-        assert_eq!(st.agent_state(&agent), Some(crate::cap::AgentState::Discovery));
-        assert_eq!(st.claims.get(&claim_id).unwrap().status, crate::cap::ClaimStatus::Released);
+        assert_eq!(
+            st.agent_state(&agent),
+            Some(crate::cap::AgentState::Discovery)
+        );
+        assert_eq!(
+            st.claims.get(&claim_id).unwrap().status,
+            crate::cap::ClaimStatus::Released
+        );
     }
 
     #[test]
     fn clear_invoked_unknown_agent_errors() {
         let s = shared_for_test("good");
-        let resp = handle_request(&s, &cap_req("good", json!({"type":"CLEAR_INVOKED","agentId":"agent-404"})));
+        let resp = handle_request(
+            &s,
+            &cap_req(
+                "good",
+                json!({"type":"CLEAR_INVOKED","agentId":"agent-404"}),
+            ),
+        );
         assert_eq!(resp.error.as_deref(), Some("AGENT_NOT_FOUND"));
     }
 
@@ -1245,8 +1385,20 @@ mod tests {
     fn current_heat_edge_created_between_two_claiming_agents() {
         let s = shared_for_test("good");
         // Two agents, both register with branch main and propose overlapping claims.
-        let a = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
-        let b = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let a = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
+        let b = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
         let mk = |agent: &str| json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{"summary":"fix session expiry"},"confidence":0.9});
         assert!(handle_request(&s, &cap_req("good", mk(&a))).ok);
         assert!(handle_request(&s, &cap_req("good", mk(&b))).ok);
@@ -1259,36 +1411,75 @@ mod tests {
     #[test]
     fn proposing_against_existing_claim_returns_recommendation() {
         let s = shared_for_test("good");
-        let a = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
-        let b = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let a = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
+        let b = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
         let mk = |agent: &str| json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{"summary":"fix session expiry"},"confidence":0.9});
         assert!(handle_request(&s, &cap_req("good", mk(&a))).ok);
         // B proposes overlapping work -> high predicted heat -> negotiate recommendation.
         let resp = handle_request(&s, &cap_req("good", mk(&b)));
         assert!(resp.ok);
-        assert_eq!(resp.data.unwrap()["recommendation"], "NEGOTIATE_BEFORE_CLAIM");
+        assert_eq!(
+            resp.data.unwrap()["recommendation"],
+            "NEGOTIATE_BEFORE_CLAIM"
+        );
     }
 
     #[test]
     fn bad_cap_version_and_unknown_event_and_release_missing() {
         let s = shared_for_test("good");
         // wrong cap version
-        let mut r = cap_req("good", json!({"type":"CLAIM_RELEASED","claimId":"claim-1","agentId":"a","reason":"TASK_COMPLETED"}));
+        let mut r = cap_req(
+            "good",
+            json!({"type":"CLAIM_RELEASED","claimId":"claim-1","agentId":"a","reason":"TASK_COMPLETED"}),
+        );
         r.cap_version = Some("9.9".to_string());
-        assert_eq!(handle_request(&s, &r).error.as_deref(), Some("UNSUPPORTED_CAP_VERSION"));
+        assert_eq!(
+            handle_request(&s, &r).error.as_deref(),
+            Some("UNSUPPORTED_CAP_VERSION")
+        );
         // unknown event type
         let resp = handle_request(&s, &cap_req("good", json!({"type":"NONSENSE"})));
         assert_eq!(resp.error.as_deref(), Some("SCHEMA_VALIDATION_FAILED"));
         // release a claim that doesn't exist
-        let resp = handle_request(&s, &cap_req("good", json!({"type":"CLAIM_RELEASED","claimId":"claim-404","agentId":"a","reason":"TASK_COMPLETED"})));
+        let resp = handle_request(
+            &s,
+            &cap_req(
+                "good",
+                json!({"type":"CLAIM_RELEASED","claimId":"claim-404","agentId":"a","reason":"TASK_COMPLETED"}),
+            ),
+        );
         assert_eq!(resp.error.as_deref(), Some("CLAIM_NOT_FOUND"));
     }
 
     #[test]
     fn releasing_a_participant_aborts_the_conflict() {
         let s = shared_for_test("good");
-        let a = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
-        let b = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let a = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
+        let b = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
         let mk = |agent: &str| json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{"summary":"fix session expiry"},"confidence":0.9});
         assert!(handle_request(&s, &cap_req("good", mk(&a))).ok);
         let rb = handle_request(&s, &cap_req("good", mk(&b)));
@@ -1303,8 +1494,20 @@ mod tests {
     #[test]
     fn high_overlap_opens_exactly_one_conflict() {
         let s = shared_for_test("good");
-        let a = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
-        let b = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let a = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
+        let b = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
         let mk = |agent: &str| json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{"summary":"fix session expiry"},"confidence":0.9});
         assert!(handle_request(&s, &cap_req("good", mk(&a))).ok);
         assert!(handle_request(&s, &cap_req("good", mk(&b))).ok); // heat 80 -> ConflictCandidate
@@ -1318,8 +1521,12 @@ mod tests {
     #[test]
     fn low_overlap_opens_no_conflict() {
         let s = shared_for_test("good");
-        let a = handle_request(&s, &req("good", "register")).agent_id.unwrap();
-        let b = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        let a = handle_request(&s, &req("good", "register"))
+            .agent_id
+            .unwrap();
+        let b = handle_request(&s, &req("good", "register"))
+            .agent_id
+            .unwrap();
         let ca = json!({"type":"CLAIM_PROPOSED","agentId":a,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/a.rs"],"task":{"summary":"alpha"},"confidence":0.9});
         let cb = json!({"type":"CLAIM_PROPOSED","agentId":b,"intent":"DOCUMENTATION","domains":["DOCS"],"estimatedFiles":["docs/b.md"],"task":{"summary":"beta"},"confidence":0.9});
         assert!(handle_request(&s, &cap_req("good", ca)).ok);
@@ -1328,13 +1535,33 @@ mod tests {
     }
 
     fn open_conflict_between_two(s: &Arc<Shared>) -> (String, String, String) {
-        let a = handle_request(s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
-        let b = handle_request(s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let a = handle_request(s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
+        let b = handle_request(s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
         let mk = |agent: &str| json!({"type":"CLAIM_PROPOSED","agentId":agent,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{"summary":"fix session expiry"},"confidence":0.9});
         assert!(handle_request(s, &cap_req("good", mk(&a))).ok);
         assert!(handle_request(s, &cap_req("good", mk(&b))).ok);
-        let id = s.conflicts.lock().unwrap().get_by_id("conflict-1").map(|c| c.conflict_id.clone())
-            .or_else(|| { let cs = s.conflicts.lock().unwrap(); cs.has_open(&a, &b).then(|| "conflict-1".to_string()) })
+        let id = s
+            .conflicts
+            .lock()
+            .unwrap()
+            .get_by_id("conflict-1")
+            .map(|c| c.conflict_id.clone())
+            .or_else(|| {
+                let cs = s.conflicts.lock().unwrap();
+                cs.has_open(&a, &b).then(|| "conflict-1".to_string())
+            })
             .expect("a conflict should be open");
         (a, b, id)
     }
@@ -1364,7 +1591,10 @@ mod tests {
         // Mixed -> escalate. Conflict stays open, AwaitingUserDecision.
         let cs = s.conflicts.lock().unwrap();
         assert_eq!(cs.open_count(), 1);
-        assert_eq!(cs.get_by_id(&id).unwrap().state, crate::conflict::ConflictState::AwaitingUserDecision);
+        assert_eq!(
+            cs.get_by_id(&id).unwrap().state,
+            crate::conflict::ConflictState::AwaitingUserDecision
+        );
     }
 
     #[test]
@@ -1374,14 +1604,20 @@ mod tests {
         assert!(handle_request(&s, &cap_req("good", proposal_ev(&id, &a, "QUEUE_TASK"))).ok);
         assert!(handle_request(&s, &cap_req("good", proposal_ev(&id, &b, "QUEUE_TASK"))).ok);
         let cs = s.conflicts.lock().unwrap();
-        assert_eq!(cs.get_by_id(&id).unwrap().state, crate::conflict::ConflictState::AwaitingUserDecision);
+        assert_eq!(
+            cs.get_by_id(&id).unwrap().state,
+            crate::conflict::ConflictState::AwaitingUserDecision
+        );
     }
 
     #[test]
     fn proposal_for_unknown_conflict_errors() {
         let s = shared_for_test("good");
         let (a, _b, _id) = open_conflict_between_two(&s);
-        let resp = handle_request(&s, &cap_req("good", proposal_ev("conflict-999", &a, "CO_OWN")));
+        let resp = handle_request(
+            &s,
+            &cap_req("good", proposal_ev("conflict-999", &a, "CO_OWN")),
+        );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("CONFLICT_NOT_FOUND"));
     }
@@ -1406,7 +1642,10 @@ mod tests {
         let _ = open_conflict_between_two(&s);
         let resp = handle_request(
             &s,
-            &cap_req("good", json!({"type":"CONFLICT_USER_DECISION","conflictId":"conflict-999","choice":"x"})),
+            &cap_req(
+                "good",
+                json!({"type":"CONFLICT_USER_DECISION","conflictId":"conflict-999","choice":"x"}),
+            ),
         );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("CONFLICT_NOT_FOUND"));
@@ -1420,7 +1659,11 @@ mod tests {
         // timeout so the conflict (no proposals) ages out -> escalated.
         sweep_proposal_timeouts(&s, now_ms() + 10_000_000);
         let cs = s.conflicts.lock().unwrap();
-        assert_eq!(cs.open_count(), 1, "timed-out conflict stays open, awaiting the user");
+        assert_eq!(
+            cs.open_count(),
+            1,
+            "timed-out conflict stays open, awaiting the user"
+        );
         assert_eq!(
             cs.get_by_id(&id).unwrap().state,
             crate::conflict::ConflictState::AwaitingUserDecision
@@ -1432,11 +1675,18 @@ mod tests {
         let s = shared_for_test("good");
         let (_a, _b, _id) = open_conflict_between_two(&s);
         // The conflict opened on src/auth/session.ts -> hotzone count >= 1.
-        let count = s.knowledge.lock().unwrap().hotzone_count("src/auth/session.ts");
+        let count = s
+            .knowledge
+            .lock()
+            .unwrap()
+            .hotzone_count("src/auth/session.ts");
         assert!(count >= 1, "expected hotzone accrual, got {count}");
         // A snapshot now scores that file > 0, so live heat would include it.
         let k = s.knowledge.lock().unwrap().snapshot(s.knowledge_k);
-        assert!(k.hotzone_risk("src/auth/session.ts") > 0.0, "hotzone risk should be live");
+        assert!(
+            k.hotzone_risk("src/auth/session.ts") > 0.0,
+            "hotzone risk should be live"
+        );
     }
 
     #[test]
@@ -1454,28 +1704,85 @@ mod tests {
     #[test]
     fn file_touched_raises_overlap_heat_and_accrues_coupling() {
         let s = shared_for_test("good");
-        let a = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
-        let b = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = json!({"branch":"main"}); r }).agent_id.unwrap();
+        let a = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
+        let b = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = json!({"branch":"main"});
+            r
+        })
+        .agent_id
+        .unwrap();
         // Disjoint estimated files -> low overlap.
         let ca = json!({"type":"CLAIM_PROPOSED","agentId":a,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/a.rs"],"task":{"summary":"alpha work"},"confidence":0.9});
         let cb = json!({"type":"CLAIM_PROPOSED","agentId":b,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/b.rs"],"task":{"summary":"beta work"},"confidence":0.9});
         assert!(handle_request(&s, &cap_req("good", ca)).ok);
         assert!(handle_request(&s, &cap_req("good", cb)).ok);
         // Heat from the disjoint-file claims, BEFORE any file overlap.
-        let before = s.heat.lock().unwrap().get(&a, &b).expect("edge exists").heat;
+        let before = s
+            .heat
+            .lock()
+            .unwrap()
+            .get(&a, &b)
+            .expect("edge exists")
+            .heat;
         // Both touch the SAME file -> overlap heat rises.
-        assert!(handle_request(&s, &cap_req("good", json!({"type":"FILE_TOUCHED","agentId":a,"files":["src/shared.rs","src/a.rs"]}))).ok);
-        assert!(handle_request(&s, &cap_req("good", json!({"type":"FILE_TOUCHED","agentId":b,"files":["src/shared.rs"]}))).ok);
-        let after = s.heat.lock().unwrap().get(&a, &b).expect("edge exists").heat;
-        assert!(after > before, "shared touched file must raise heat: before={before} after={after}");
+        assert!(
+            handle_request(
+                &s,
+                &cap_req(
+                    "good",
+                    json!({"type":"FILE_TOUCHED","agentId":a,"files":["src/shared.rs","src/a.rs"]})
+                )
+            )
+            .ok
+        );
+        assert!(
+            handle_request(
+                &s,
+                &cap_req(
+                    "good",
+                    json!({"type":"FILE_TOUCHED","agentId":b,"files":["src/shared.rs"]})
+                )
+            )
+            .ok
+        );
+        let after = s
+            .heat
+            .lock()
+            .unwrap()
+            .get(&a, &b)
+            .expect("edge exists")
+            .heat;
+        assert!(
+            after > before,
+            "shared touched file must raise heat: before={before} after={after}"
+        );
         // a touched two files together -> they couple.
-        assert!(s.knowledge.lock().unwrap().coupling_count("src/shared.rs", "src/a.rs") >= 1);
+        assert!(
+            s.knowledge
+                .lock()
+                .unwrap()
+                .coupling_count("src/shared.rs", "src/a.rs")
+                >= 1
+        );
     }
 
     #[test]
     fn file_touched_unknown_agent_errors() {
         let s = shared_for_test("good");
-        let resp = handle_request(&s, &cap_req("good", json!({"type":"FILE_TOUCHED","agentId":"agent-404","files":["x"]})));
+        let resp = handle_request(
+            &s,
+            &cap_req(
+                "good",
+                json!({"type":"FILE_TOUCHED","agentId":"agent-404","files":["x"]}),
+            ),
+        );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("AGENT_NOT_FOUND"));
     }
@@ -1483,9 +1790,17 @@ mod tests {
     #[test]
     fn file_touched_claimless_agent_errors() {
         let s = shared_for_test("good");
-        let a = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        let a = handle_request(&s, &req("good", "register"))
+            .agent_id
+            .unwrap();
         // Registered but no claim -> CLAIM_NOT_FOUND.
-        let resp = handle_request(&s, &cap_req("good", json!({"type":"FILE_TOUCHED","agentId":a,"files":["x"]})));
+        let resp = handle_request(
+            &s,
+            &cap_req(
+                "good",
+                json!({"type":"FILE_TOUCHED","agentId":a,"files":["x"]}),
+            ),
+        );
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("CLAIM_NOT_FOUND"));
     }
@@ -1493,15 +1808,22 @@ mod tests {
     #[test]
     fn low_overlap_emits_no_threshold_and_release_drops_edge() {
         let s = shared_for_test("good");
-        let a = handle_request(&s, &req("good", "register")).agent_id.unwrap();
-        let b = handle_request(&s, &req("good", "register")).agent_id.unwrap();
+        let a = handle_request(&s, &req("good", "register"))
+            .agent_id
+            .unwrap();
+        let b = handle_request(&s, &req("good", "register"))
+            .agent_id
+            .unwrap();
         // Disjoint claims -> low heat (different intent/files/domains), edge exists but band is low.
         let ca = json!({"type":"CLAIM_PROPOSED","agentId":a,"intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/a.rs"],"task":{"summary":"alpha"},"confidence":0.9});
         let cb = json!({"type":"CLAIM_PROPOSED","agentId":b,"intent":"DOCUMENTATION","domains":["DOCS"],"estimatedFiles":["docs/b.md"],"task":{"summary":"beta"},"confidence":0.9});
         assert!(handle_request(&s, &cap_req("good", ca)).ok);
         let cb_resp = handle_request(&s, &cap_req("good", cb));
         assert!(cb_resp.ok);
-        let cb_id = cb_resp.data.unwrap()["claimId"].as_str().unwrap().to_string();
+        let cb_id = cb_resp.data.unwrap()["claimId"]
+            .as_str()
+            .unwrap()
+            .to_string();
         // Edge exists (current heat computed) and is below the conflict band.
         {
             let store = s.heat.lock().unwrap();
@@ -1509,17 +1831,25 @@ mod tests {
             assert!(edge.heat <= 50, "expected low heat, got {}", edge.heat);
         }
         // Release b's claim -> b has no live claim -> its heat edges are dropped.
-        let release = json!({"type":"CLAIM_RELEASED","claimId":cb_id,"agentId":b,"reason":"TASK_COMPLETED"});
+        let release =
+            json!({"type":"CLAIM_RELEASED","claimId":cb_id,"agentId":b,"reason":"TASK_COMPLETED"});
         assert!(handle_request(&s, &cap_req("good", release)).ok);
         let store = s.heat.lock().unwrap();
-        assert!(store.get(&a, &b).is_none(), "edge should be dropped after release");
+        assert!(
+            store.get(&a, &b).is_none(),
+            "edge should be dropped after release"
+        );
     }
 
     #[test]
     fn get_state_returns_live_snapshot() {
         let s = shared_for_test("good");
         // Register agent and give it a claim
-        let reg = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = serde_json::json!({}); r });
+        let reg = handle_request(&s, &{
+            let mut r = req("good", "register");
+            r.meta = serde_json::json!({});
+            r
+        });
         let agent_id = reg.agent_id.clone().unwrap();
         let mut claim_req = req("good", "submit_event");
         claim_req.cap_version = Some("0.1".into());
@@ -1542,7 +1872,10 @@ mod tests {
         let agents = data["agents"].as_array().unwrap();
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0]["agentId"], agent_id);
-        assert!(!data["claims"].as_array().unwrap().is_empty() || data["agents"][0]["claimId"].is_string());
+        assert!(
+            !data["claims"].as_array().unwrap().is_empty()
+                || data["agents"][0]["claimId"].is_string()
+        );
         let heat = data["heat"].as_array().unwrap();
         assert!(heat.is_empty()); // no heat yet with one agent
     }

@@ -49,7 +49,11 @@ fn acquire_lock_inner(paths: &Paths, version: &str, retry: bool) -> std::io::Res
         project_root: paths.root.to_string_lossy().into_owned(),
         core_version: version.to_string(),
     };
-    match OpenOptions::new().write(true).create_new(true).open(paths.lock()) {
+    match OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(paths.lock())
+    {
         Ok(mut f) => {
             f.write_all(serde_json::to_string(&info)?.as_bytes())?;
             f.sync_all()?;
@@ -153,7 +157,10 @@ mod tests {
         fs::write(paths.lock(), serde_json::to_string(&stale).unwrap()).unwrap();
         match acquire_lock(&paths, VERSION).unwrap() {
             LockOutcome::Acquired => {}
-            other => panic!("expected Acquired after breaking stale lock, got {:?}", other),
+            other => panic!(
+                "expected Acquired after breaking stale lock, got {:?}",
+                other
+            ),
         }
         let _ = fs::remove_dir_all(&root);
     }
@@ -172,7 +179,10 @@ mod tests {
         fs::write(paths.lock(), b"not json").unwrap();
         match acquire_lock(&paths, VERSION).unwrap() {
             LockOutcome::Acquired => {}
-            other => panic!("expected Acquired after breaking unparseable lock, got {:?}", other),
+            other => panic!(
+                "expected Acquired after breaking unparseable lock, got {:?}",
+                other
+            ),
         }
         let _ = fs::remove_dir_all(&root);
     }

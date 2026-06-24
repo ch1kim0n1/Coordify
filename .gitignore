@@ -10,5 +10,12 @@ phase-0/results/hook-matrix.md
 # Rust build output
 /packages/coordify-core/target/
 
+# TypeScript build output + dependencies
+**/dist/
+**/node_modules/
+
+# macOS metadata
+.DS_Store
+
 # Coordify runtime state (sockets, tokens, logs, traces)
 **/.coordify/

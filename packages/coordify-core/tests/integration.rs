@@ -75,7 +75,10 @@ fn spawn_core(tag: &str) -> Spawned {
         .spawn()
         .expect("failed to spawn coordify-core");
     let sock = root.join(".coordify/runtime/core.sock");
-    assert!(wait_for(&sock, Duration::from_secs(5)), "socket never appeared");
+    assert!(
+        wait_for(&sock, Duration::from_secs(5)),
+        "socket never appeared"
+    );
     Spawned { child, root }
 }
 
@@ -89,7 +92,10 @@ fn spawn_core_fast_reaper(tag: &str) -> Spawned {
         .spawn()
         .expect("failed to spawn coordify-core");
     let sock = root.join(".coordify/runtime/core.sock");
-    assert!(wait_for(&sock, Duration::from_secs(5)), "socket never appeared");
+    assert!(
+        wait_for(&sock, Duration::from_secs(5)),
+        "socket never appeared"
+    );
     Spawned { child, root }
 }
 
@@ -104,7 +110,10 @@ fn spawn_core_fast_proposal_timeout(tag: &str) -> Spawned {
         .spawn()
         .expect("failed to spawn coordify-core");
     let sock = root.join(".coordify/runtime/core.sock");
-    assert!(wait_for(&sock, Duration::from_secs(5)), "socket never appeared");
+    assert!(
+        wait_for(&sock, Duration::from_secs(5)),
+        "socket never appeared"
+    );
     Spawned { child, root }
 }
 
@@ -202,8 +211,14 @@ fn reaper_logs_agent_lost_and_orphans_claim() {
     let sock = core.root.join(".coordify/runtime/core.sock");
 
     let mut stream = connect_retry(&sock);
-    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
-    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+    let reg = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
+        token
+    );
+    let agent = send_line(&mut stream, &reg)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let propose = format!(
         r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","confidence":0.9}}}}"#,
         token, agent
@@ -224,7 +239,10 @@ fn reaper_logs_agent_lost_and_orphans_claim() {
         }
     }
     assert!(log_contents.contains("AGENT_LOST"), "no AGENT_LOST logged");
-    assert!(log_contents.contains("CLAIM_ORPHANED"), "no CLAIM_ORPHANED logged");
+    assert!(
+        log_contents.contains("CLAIM_ORPHANED"),
+        "no CLAIM_ORPHANED logged"
+    );
     drop(stream);
 }
 
@@ -265,7 +283,10 @@ fn reaper_finalizes_when_last_silent_agent_times_out() {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(finalized, "reaper did not finalize after last silent agent timed out");
+    assert!(
+        finalized,
+        "reaper did not finalize after last silent agent timed out"
+    );
     assert!(lock_gone, "lock not removed by finalize");
     drop(stream);
 }
@@ -291,7 +312,10 @@ fn blank_line_is_skipped_then_register_succeeds() {
     );
     let resp = send_line(&mut stream, &reg);
     assert_eq!(resp["ok"], true, "register after blank line should succeed");
-    assert!(resp["agent_id"].as_str().unwrap_or("").starts_with("agent-"));
+    assert!(resp["agent_id"]
+        .as_str()
+        .unwrap_or("")
+        .starts_with("agent-"));
 }
 
 // ---------------------------------------------------------------------------
@@ -349,7 +373,10 @@ fn unregistered_connection_leaves_daemon_alive() {
         token
     );
     let resp2 = send_line(&mut stream2, &reg);
-    assert_eq!(resp2["ok"], true, "daemon should still accept connections after unregistered drop");
+    assert_eq!(
+        resp2["ok"], true,
+        "daemon should still accept connections after unregistered drop"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -361,7 +388,10 @@ fn second_instance_exits_zero_when_lock_held() {
     let core = spawn_core("held");
     // Give instance A a moment to finish writing the lock.
     let lock = core.root.join(".coordify/runtime/core.lock");
-    assert!(wait_for(&lock, Duration::from_secs(5)), "lock never appeared");
+    assert!(
+        wait_for(&lock, Duration::from_secs(5)),
+        "lock never appeared"
+    );
 
     // Spawn instance B on the SAME root — it should detect the held lock and exit 0.
     let output = Command::new(env!("CARGO_BIN_EXE_coordify-core"))
@@ -411,8 +441,14 @@ fn claim_proposed_and_released_over_socket() {
     let sock = core.root.join(".coordify/runtime/core.sock");
     let mut stream = connect_retry(&sock);
 
-    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
-    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+    let reg = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
+        token
+    );
+    let agent = send_line(&mut stream, &reg)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let propose = format!(
         r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","confidence":0.9}}}}"#,
@@ -436,8 +472,14 @@ fn agent_state_change_over_socket() {
     let token = read_token(&core.root);
     let sock = core.root.join(".coordify/runtime/core.sock");
     let mut stream = connect_retry(&sock);
-    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
-    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+    let reg = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
+        token
+    );
+    let agent = send_line(&mut stream, &reg)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let good = format!(
         r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"AGENT_STATE_CHANGED","agentId":"{}","state":"ACTIVE"}}}}"#,
@@ -461,8 +503,14 @@ fn clear_invoked_over_socket_releases_and_bumps_generation() {
     let token = read_token(&core.root);
     let sock = core.root.join(".coordify/runtime/core.sock");
     let mut stream = connect_retry(&sock);
-    let reg = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#, token);
-    let agent = send_line(&mut stream, &reg)["agent_id"].as_str().unwrap().to_string();
+    let reg = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{}}}}"#,
+        token
+    );
+    let agent = send_line(&mut stream, &reg)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let propose = format!(
         r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","confidence":0.9}}}}"#,
@@ -545,7 +593,10 @@ fn overlapping_claims_emit_heat_updated() {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(log_contents.contains("HEAT_UPDATED"), "no HEAT_UPDATED logged");
+    assert!(
+        log_contents.contains("HEAT_UPDATED"),
+        "no HEAT_UPDATED logged"
+    );
     assert!(
         log_contents.contains("HEAT_THRESHOLD_EXCEEDED"),
         "expected threshold exceeded for high overlap"
@@ -563,8 +614,14 @@ fn predicted_heat_calculated_logged_on_second_overlapping_claim() {
     // connections would cause the server to exit after A disconnects).
     let mut stream = connect_retry(&sock);
 
-    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let agent_a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
+    let reg_a = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let agent_a = send_line(&mut stream, &reg_a)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     let claim_a = format!(
         r#"{{"id":"2","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
@@ -572,8 +629,14 @@ fn predicted_heat_calculated_logged_on_second_overlapping_claim() {
     );
     assert_eq!(send_line(&mut stream, &claim_a)["ok"], true);
 
-    let reg_b = format!(r#"{{"id":"3","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let agent_b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
+    let reg_b = format!(
+        r#"{{"id":"3","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let agent_b = send_line(&mut stream, &reg_b)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
     let claim_b = format!(
         r#"{{"id":"4","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
         token, agent_b
@@ -601,7 +664,10 @@ fn predicted_heat_calculated_logged_on_second_overlapping_claim() {
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
-    assert!(log_contents.contains("PREDICTED_HEAT_CALCULATED"), "no PREDICTED_HEAT_CALCULATED logged");
+    assert!(
+        log_contents.contains("PREDICTED_HEAT_CALCULATED"),
+        "no PREDICTED_HEAT_CALCULATED logged"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -637,15 +703,29 @@ fn high_overlap_claims_open_conflict() {
     let sock = core.root.join(".coordify/runtime/core.sock");
     let mut stream = connect_retry(&sock);
 
-    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
-    let reg_b = format!(r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
-
-    let mk = |id: &str, agent: &str| format!(
-        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
-        id, token, agent
+    let reg_a = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
     );
+    let a = send_line(&mut stream, &reg_a)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let reg_b = format!(
+        r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let b = send_line(&mut stream, &reg_b)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mk = |id: &str, agent: &str| {
+        format!(
+            r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+            id, token, agent
+        )
+    };
     assert_eq!(send_line(&mut stream, &mk("3", &a))["ok"], true);
     assert_eq!(send_line(&mut stream, &mk("4", &b))["ok"], true);
 
@@ -668,7 +748,10 @@ fn high_overlap_claims_open_conflict() {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(log_contents.contains("CONFLICT_OPENED"), "no CONFLICT_OPENED logged for high-overlap pair");
+    assert!(
+        log_contents.contains("CONFLICT_OPENED"),
+        "no CONFLICT_OPENED logged for high-overlap pair"
+    );
 }
 
 #[test]
@@ -678,15 +761,29 @@ fn releasing_participant_aborts_conflict_over_socket() {
     let sock = core.root.join(".coordify/runtime/core.sock");
     let mut stream = connect_retry(&sock);
 
-    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
-    let reg_b = format!(r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
-
-    let mk = |id: &str, agent: &str| format!(
-        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
-        id, token, agent
+    let reg_a = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
     );
+    let a = send_line(&mut stream, &reg_a)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let reg_b = format!(
+        r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let b = send_line(&mut stream, &reg_b)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mk = |id: &str, agent: &str| {
+        format!(
+            r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+            id, token, agent
+        )
+    };
     assert_eq!(send_line(&mut stream, &mk("3", &a))["ok"], true);
     let rb = send_line(&mut stream, &mk("4", &b));
     let b_claim = rb["data"]["claimId"].as_str().unwrap().to_string();
@@ -717,8 +814,14 @@ fn releasing_participant_aborts_conflict_over_socket() {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(log_contents.contains("CONFLICT_OPENED"), "expected CONFLICT_OPENED");
-    assert!(log_contents.contains("CONFLICT_ABORTED"), "expected CONFLICT_ABORTED after release");
+    assert!(
+        log_contents.contains("CONFLICT_OPENED"),
+        "expected CONFLICT_OPENED"
+    );
+    assert!(
+        log_contents.contains("CONFLICT_ABORTED"),
+        "expected CONFLICT_ABORTED after release"
+    );
 }
 
 #[test]
@@ -728,24 +831,43 @@ fn negotiation_resolves_conflict_over_socket() {
     let sock = core.root.join(".coordify/runtime/core.sock");
     let mut stream = connect_retry(&sock);
 
-    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
-    let reg_b = format!(r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
-
-    let mk = |id: &str, agent: &str| format!(
-        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
-        id, token, agent
+    let reg_a = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
     );
+    let a = send_line(&mut stream, &reg_a)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let reg_b = format!(
+        r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let b = send_line(&mut stream, &reg_b)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mk = |id: &str, agent: &str| {
+        format!(
+            r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+            id, token, agent
+        )
+    };
     assert_eq!(send_line(&mut stream, &mk("3", &a))["ok"], true);
     assert_eq!(send_line(&mut stream, &mk("4", &b))["ok"], true); // conflict-1 opens
 
     // One agent yields, the other co-owns -> Core auto-resolves (PARTICIPANT_STEPPED_ASIDE).
-    let prop = |id: &str, agent: &str, kind: &str| format!(
-        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CONFLICT_PROPOSAL_SUBMITTED","conflictId":"conflict-1","from":"{}","proposal":{{"kind":"{}","summary":"{} proposes"}}}}}}"#,
-        id, token, agent, kind, agent
+    let prop = |id: &str, agent: &str, kind: &str| {
+        format!(
+            r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CONFLICT_PROPOSAL_SUBMITTED","conflictId":"conflict-1","from":"{}","proposal":{{"kind":"{}","summary":"{} proposes"}}}}}}"#,
+            id, token, agent, kind, agent
+        )
+    };
+    assert_eq!(
+        send_line(&mut stream, &prop("5", &a, "YIELD_CLAIM"))["ok"],
+        true
     );
-    assert_eq!(send_line(&mut stream, &prop("5", &a, "YIELD_CLAIM"))["ok"], true);
     assert_eq!(send_line(&mut stream, &prop("6", &b, "CO_OWN"))["ok"], true);
 
     drop(stream);
@@ -767,9 +889,18 @@ fn negotiation_resolves_conflict_over_socket() {
         }
         std::thread::sleep(Duration::from_millis(20));
     }
-    assert!(log_contents.contains("CONFLICT_OPENED"), "expected CONFLICT_OPENED");
-    assert!(log_contents.contains("CONFLICT_PROPOSAL_RECEIVED"), "expected proposals logged");
-    assert!(log_contents.contains("PARTICIPANT_STEPPED_ASIDE"), "expected negotiated resolution");
+    assert!(
+        log_contents.contains("CONFLICT_OPENED"),
+        "expected CONFLICT_OPENED"
+    );
+    assert!(
+        log_contents.contains("CONFLICT_PROPOSAL_RECEIVED"),
+        "expected proposals logged"
+    );
+    assert!(
+        log_contents.contains("PARTICIPANT_STEPPED_ASIDE"),
+        "expected negotiated resolution"
+    );
 }
 
 #[test]
@@ -781,15 +912,29 @@ fn knowledge_files_written_after_conflict_session() {
     let sock = core.root.join(".coordify/runtime/core.sock");
     let mut stream = connect_retry(&sock);
 
-    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
-    let reg_b = format!(r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
-
-    let mk = |id: &str, agent: &str| format!(
-        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts","src/auth/tokens.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
-        id, token, agent
+    let reg_a = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
     );
+    let a = send_line(&mut stream, &reg_a)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let reg_b = format!(
+        r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let b = send_line(&mut stream, &reg_b)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mk = |id: &str, agent: &str| {
+        format!(
+            r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts","src/auth/tokens.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+            id, token, agent
+        )
+    };
     assert_eq!(send_line(&mut stream, &mk("3", &a))["ok"], true);
     assert_eq!(send_line(&mut stream, &mk("4", &b))["ok"], true); // conflict opens on the shared files
 
@@ -802,15 +947,26 @@ fn knowledge_files_written_after_conflict_session() {
     while start.elapsed() < Duration::from_secs(3) {
         if hz.exists() && cp.exists() {
             hz_contents = std::fs::read_to_string(&hz).unwrap();
-            if hz_contents.contains("src/auth/session.ts") { break; }
+            if hz_contents.contains("src/auth/session.ts") {
+                break;
+            }
         }
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(hz.exists(), "hotzones.json should be written at finalize");
-    assert!(cp.exists(), "coupling-graph.json should be written at finalize");
-    assert!(hz_contents.contains("src/auth/session.ts"), "hotzone for the conflict file:\n{hz_contents}");
+    assert!(
+        cp.exists(),
+        "coupling-graph.json should be written at finalize"
+    );
+    assert!(
+        hz_contents.contains("src/auth/session.ts"),
+        "hotzone for the conflict file:\n{hz_contents}"
+    );
     let cp_contents = std::fs::read_to_string(&cp).unwrap();
-    assert!(cp_contents.contains("src/auth/tokens.ts"), "coupling edge present:\n{cp_contents}");
+    assert!(
+        cp_contents.contains("src/auth/tokens.ts"),
+        "coupling edge present:\n{cp_contents}"
+    );
 }
 
 #[test]
@@ -820,12 +976,26 @@ fn stats_files_written_after_session() {
     let sock = core.root.join(".coordify/runtime/core.sock");
     let mut stream = connect_retry(&sock);
 
-    let reg = |id: &str| format!(r#"{{"id":"{}","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, id, token);
-    let a = send_line(&mut stream, &reg("1"))["agent_id"].as_str().unwrap().to_string();
-    let b = send_line(&mut stream, &reg("2"))["agent_id"].as_str().unwrap().to_string();
-    let mk = |id: &str, agent: &str| format!(
-        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix"}},"confidence":0.9}}}}"#,
-        id, token, agent);
+    let reg = |id: &str| {
+        format!(
+            r#"{{"id":"{}","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+            id, token
+        )
+    };
+    let a = send_line(&mut stream, &reg("1"))["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let b = send_line(&mut stream, &reg("2"))["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let mk = |id: &str, agent: &str| {
+        format!(
+            r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix"}},"confidence":0.9}}}}"#,
+            id, token, agent
+        )
+    };
     assert_eq!(send_line(&mut stream, &mk("3", &a))["ok"], true);
     assert_eq!(send_line(&mut stream, &mk("4", &b))["ok"], true);
 
@@ -839,24 +1009,42 @@ fn stats_files_written_after_session() {
         if let Ok(entries) = std::fs::read_dir(&sdir) {
             for e in entries.flatten() {
                 let f = e.path().join("session-summary.json");
-                if f.exists() { summary = std::fs::read_to_string(f).unwrap(); }
+                if f.exists() {
+                    summary = std::fs::read_to_string(f).unwrap();
+                }
             }
         }
-        if !summary.is_empty() && kdir.join("agent-profiles.json").exists() { break; }
+        if !summary.is_empty() && kdir.join("agent-profiles.json").exists() {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(!summary.is_empty(), "session-summary.json written");
-    assert!(summary.contains("\"conflicts\""), "summary has conflicts section:\n{summary}");
+    assert!(
+        summary.contains("\"conflicts\""),
+        "summary has conflicts section:\n{summary}"
+    );
     assert!(summary.contains("\"narrative\""), "summary has narrative");
     // sibling per-session files
-    let any_session = std::fs::read_dir(&sdir).unwrap().flatten().map(|e| e.path()).find(|p| p.join("stats.json").exists()).expect("a session dir with stats.json");
+    let any_session = std::fs::read_dir(&sdir)
+        .unwrap()
+        .flatten()
+        .map(|e| e.path())
+        .find(|p| p.join("stats.json").exists())
+        .expect("a session dir with stats.json");
     assert!(any_session.join("stats.json").exists());
     assert!(any_session.join("heat-history.json").exists());
     assert!(any_session.join("entertainment.json").exists());
     // cross-session profiles
-    assert!(kdir.join("agent-profiles.json").exists(), "agent-profiles.json written");
+    assert!(
+        kdir.join("agent-profiles.json").exists(),
+        "agent-profiles.json written"
+    );
     let prof = std::fs::read_to_string(kdir.join("agent-profiles.json")).unwrap();
-    assert!(prof.contains(&a) || prof.contains("claimsMade"), "profiles populated:\n{prof}");
+    assert!(
+        prof.contains(&a) || prof.contains("claimsMade"),
+        "profiles populated:\n{prof}"
+    );
 }
 
 #[test]
@@ -866,23 +1054,39 @@ fn file_touched_over_socket_raises_heat() {
     let sock = core.root.join(".coordify/runtime/core.sock");
     let mut stream = connect_retry(&sock);
 
-    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
-    let reg_b = format!(r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
+    let reg_a = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let a = send_line(&mut stream, &reg_a)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let reg_b = format!(
+        r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let b = send_line(&mut stream, &reg_b)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
 
     // Claims with NO estimated files (like the real adapter).
-    let claim = |id: &str, agent: &str| format!(
-        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"task":{{"summary":"work"}},"confidence":0.9}}}}"#,
-        id, token, agent
-    );
+    let claim = |id: &str, agent: &str| {
+        format!(
+            r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"task":{{"summary":"work"}},"confidence":0.9}}}}"#,
+            id, token, agent
+        )
+    };
     assert_eq!(send_line(&mut stream, &claim("3", &a))["ok"], true);
     assert_eq!(send_line(&mut stream, &claim("4", &b))["ok"], true);
 
-    let touch = |id: &str, agent: &str| format!(
-        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"FILE_TOUCHED","agentId":"{}","files":["src/auth/session.ts"]}}}}"#,
-        id, token, agent
-    );
+    let touch = |id: &str, agent: &str| {
+        format!(
+            r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"FILE_TOUCHED","agentId":"{}","files":["src/auth/session.ts"]}}}}"#,
+            id, token, agent
+        )
+    };
     assert_eq!(send_line(&mut stream, &touch("5", &a))["ok"], true);
     assert_eq!(send_line(&mut stream, &touch("6", &b))["ok"], true);
 
@@ -895,15 +1099,25 @@ fn file_touched_over_socket_raises_heat() {
         if let Ok(entries) = std::fs::read_dir(&sessions) {
             for e in entries.flatten() {
                 let f = e.path().join("events.log");
-                if f.exists() { log = std::fs::read_to_string(f).unwrap(); }
+                if f.exists() {
+                    log = std::fs::read_to_string(f).unwrap();
+                }
             }
         }
-        if log.contains("FILE_TOUCHED") && log.contains("\"pair\"") { break; }
+        if log.contains("FILE_TOUCHED") && log.contains("\"pair\"") {
+            break;
+        }
         std::thread::sleep(Duration::from_millis(20));
     }
     assert!(log.contains("FILE_TOUCHED"), "FILE_TOUCHED logged");
-    assert!(log.contains("src/auth/session.ts"), "touched file in log:\n{log}");
-    assert!(log.contains("HEAT_UPDATED"), "FILE_TOUCHED should trigger heat recompute:\n{log}");
+    assert!(
+        log.contains("src/auth/session.ts"),
+        "touched file in log:\n{log}"
+    );
+    assert!(
+        log.contains("HEAT_UPDATED"),
+        "FILE_TOUCHED should trigger heat recompute:\n{log}"
+    );
 }
 
 #[test]
@@ -913,15 +1127,29 @@ fn reaper_escalates_timed_out_conflict_over_socket() {
     let sock = core.root.join(".coordify/runtime/core.sock");
     let mut stream = connect_retry(&sock);
 
-    let reg_a = format!(r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let a = send_line(&mut stream, &reg_a)["agent_id"].as_str().unwrap().to_string();
-    let reg_b = format!(r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#, token);
-    let b = send_line(&mut stream, &reg_b)["agent_id"].as_str().unwrap().to_string();
-
-    let mk = |id: &str, agent: &str| format!(
-        r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
-        id, token, agent
+    let reg_a = format!(
+        r#"{{"id":"1","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
     );
+    let a = send_line(&mut stream, &reg_a)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    let reg_b = format!(
+        r#"{{"id":"2","token":"{}","action":"register","meta":{{"branch":"main"}}}}"#,
+        token
+    );
+    let b = send_line(&mut stream, &reg_b)["agent_id"]
+        .as_str()
+        .unwrap()
+        .to_string();
+
+    let mk = |id: &str, agent: &str| {
+        format!(
+            r#"{{"id":"{}","token":"{}","action":"submit_event","capVersion":"0.1","event":{{"type":"CLAIM_PROPOSED","agentId":"{}","intent":"BUGFIX","domains":["AUTH"],"estimatedFiles":["src/auth/session.ts"],"task":{{"summary":"fix session expiry"}},"confidence":0.9}}}}"#,
+            id, token, agent
+        )
+    };
     assert_eq!(send_line(&mut stream, &mk("3", &a))["ok"], true);
     assert_eq!(send_line(&mut stream, &mk("4", &b))["ok"], true); // conflict-1 opens
 
@@ -948,7 +1176,16 @@ fn reaper_escalates_timed_out_conflict_over_socket() {
         std::thread::sleep(Duration::from_millis(50));
     }
     drop(stream);
-    assert!(log_contents.contains("CONFLICT_OPENED"), "expected CONFLICT_OPENED");
-    assert!(log_contents.contains("CONFLICT_TIMEOUT"), "expected CONFLICT_TIMEOUT from reaper sweep:\n{log_contents}");
-    assert!(log_contents.contains("USER_ARBITRATION_REQUIRED"), "expected arbitration after timeout");
+    assert!(
+        log_contents.contains("CONFLICT_OPENED"),
+        "expected CONFLICT_OPENED"
+    );
+    assert!(
+        log_contents.contains("CONFLICT_TIMEOUT"),
+        "expected CONFLICT_TIMEOUT from reaper sweep:\n{log_contents}"
+    );
+    assert!(
+        log_contents.contains("USER_ARBITRATION_REQUIRED"),
+        "expected arbitration after timeout"
+    );
 }

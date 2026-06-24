@@ -226,8 +226,7 @@ pub fn build_entertainment(events: &[Value], stats: &SessionStats) -> Entertainm
             "CONFLICT_RESOLVED" | "CONFLICT_ESCALATED" => {
                 let cid = ev_str(e, "conflictId");
                 if let Some(open_ms) = conflict_open.remove(&cid) {
-                    if let Some(close_ms) =
-                        e.get("ts").and_then(|v| v.as_str()).and_then(parse_ms)
+                    if let Some(close_ms) = e.get("ts").and_then(|v| v.as_str()).and_then(parse_ms)
                     {
                         let span = close_ms - open_ms;
                         let update = match &longest_neg {
@@ -263,13 +262,8 @@ pub fn build_entertainment(events: &[Value], stats: &SessionStats) -> Entertainm
                                         Some((_, _, _, _, d)) => delta > *d,
                                     };
                                     if update {
-                                        biggest_spike = Some((
-                                            key.0.clone(),
-                                            key.1.clone(),
-                                            prev,
-                                            heat,
-                                            delta,
-                                        ));
+                                        biggest_spike =
+                                            Some((key.0.clone(), key.1.clone(), prev, heat, delta));
                                     }
                                 }
                             }
@@ -434,7 +428,11 @@ pub fn build_entertainment(events: &[Value], stats: &SessionStats) -> Entertainm
     }
 
     // diplomat: agent with most non-escalated proposals (any count > 0)
-    if let Some((agent, _)) = diplomat_count.iter().filter(|(_, &v)| v > 0).max_by(|(a1, &v1), (a2, &v2)| v1.cmp(&v2).then(a2.cmp(a1))) {
+    if let Some((agent, _)) = diplomat_count
+        .iter()
+        .filter(|(_, &v)| v > 0)
+        .max_by(|(a1, &v1), (a2, &v2)| v1.cmp(&v2).then(a2.cmp(a1)))
+    {
         badges.push(Badge {
             id: "diplomat".to_string(),
             label: "Diplomat".to_string(),
@@ -726,11 +724,7 @@ mod tests {
         );
         // every badge color is in the palette; every label is plain ASCII (no emoji)
         for b in &e.badges {
-            assert!(
-                PALETTE.contains(&b.color.as_str()),
-                "bad color {}",
-                b.color
-            );
+            assert!(PALETTE.contains(&b.color.as_str()), "bad color {}", b.color);
             assert!(
                 b.label.chars().all(|c| (c as u32) < 0x7F),
                 "non-ASCII label {}",
@@ -812,9 +806,7 @@ mod tests {
             e.narrative.chars().all(|c| (c as u32) < 0x7F),
             "narrative has non-ASCII/emoji"
         );
-        assert!(
-            e.narrative.contains("recap") | e.narrative.contains("Session"),
-        );
+        assert!(e.narrative.contains("recap") | e.narrative.contains("Session"),);
     }
 
     #[test]
@@ -880,10 +872,18 @@ mod tests {
         let stats = crate::stats::summarize(&evs);
         let e = build_entertainment(&evs, &stats);
         // biggest spike = 35 (5→40), not 5 (40→45)
-        let spike = e.superlatives.iter().find(|s| s.key == "biggest_spike").unwrap();
+        let spike = e
+            .superlatives
+            .iter()
+            .find(|s| s.key == "biggest_spike")
+            .unwrap();
         assert_eq!(spike.value["delta"], 35);
         // longest negotiation = c-a (3000ms), not c-b (1000ms)
-        let neg = e.superlatives.iter().find(|s| s.key == "longest_negotiation").unwrap();
+        let neg = e
+            .superlatives
+            .iter()
+            .find(|s| s.key == "longest_negotiation")
+            .unwrap();
         assert_eq!(neg.value["ms"], 3000);
         assert!(!e.narrative.is_empty());
     }
@@ -896,7 +896,7 @@ mod tests {
         // → exercises the Some((_, max_ms)) => span > *max_ms arm of longest_neg
         let evs = vec![
             json!({"type":"HEAT_UPDATED","pair":["a","b"],"heat":10,"band":"SAFE","ts":"2026-06-23T00:00:00Z"}),
-            json!({"type":"HEAT_UPDATED","pair":["a","b"],"heat":30,"band":"MONITOR","ts":"2026-06-23T00:00:01Z"}),   // spike delta=20
+            json!({"type":"HEAT_UPDATED","pair":["a","b"],"heat":30,"band":"MONITOR","ts":"2026-06-23T00:00:01Z"}), // spike delta=20
             json!({"type":"HEAT_UPDATED","pair":["a","b"],"heat":80,"band":"CONFLICT_CANDIDATE","ts":"2026-06-23T00:00:02Z"}), // spike delta=50 → new max
             json!({"type":"CONFLICT_OPENED","conflictId":"c-1","agents":["a","b"],"paths":[],"ts":"2026-06-23T00:00:03Z"}),
             json!({"type":"CONFLICT_RESOLVED","conflictId":"c-1","resolution":"PARTICIPANT_STEPPED_ASIDE","ts":"2026-06-23T00:00:04Z"}), // span=1000ms
@@ -905,9 +905,17 @@ mod tests {
         ];
         let stats = crate::stats::summarize(&evs);
         let e = build_entertainment(&evs, &stats);
-        let spike = e.superlatives.iter().find(|s| s.key == "biggest_spike").unwrap();
+        let spike = e
+            .superlatives
+            .iter()
+            .find(|s| s.key == "biggest_spike")
+            .unwrap();
         assert_eq!(spike.value["delta"], 50);
-        let neg = e.superlatives.iter().find(|s| s.key == "longest_negotiation").unwrap();
+        let neg = e
+            .superlatives
+            .iter()
+            .find(|s| s.key == "longest_negotiation")
+            .unwrap();
         assert_eq!(neg.value["ms"], 3000);
     }
 
@@ -935,9 +943,9 @@ mod tests {
             // Two agents with equal avg claim duration → speed_demon comparator fires (line 508-514)
             // and then_with tiebreak (line 513 col 35) is exercised when partial_cmp = Equal
             json!({"type":"CLAIM_CREATED","claimId":"ca","agentId":"a","ts":"2026-06-23T00:00:06Z"}),
-            json!({"type":"CLAIM_RELEASED","claimId":"ca","agentId":"a","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:08Z"}),  // 2000ms
+            json!({"type":"CLAIM_RELEASED","claimId":"ca","agentId":"a","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:08Z"}), // 2000ms
             json!({"type":"CLAIM_CREATED","claimId":"cb","agentId":"b","ts":"2026-06-23T00:00:09Z"}),
-            json!({"type":"CLAIM_RELEASED","claimId":"cb","agentId":"b","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:11Z"}),  // 2000ms — equal avg → tiebreak by agent id
+            json!({"type":"CLAIM_RELEASED","claimId":"cb","agentId":"b","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:11Z"}), // 2000ms — equal avg → tiebreak by agent id
             // CLAIM_RELEASED with empty agentId → if dur >= 0 && !agent.is_empty() = false (line 299)
             json!({"type":"CLAIM_CREATED","claimId":"cc","agentId":"c","ts":"2026-06-23T00:00:15Z"}),
             json!({"type":"CLAIM_RELEASED","claimId":"cc","agentId":"","reason":"TASK_COMPLETED","ts":"2026-06-23T00:00:16Z"}),
@@ -945,7 +953,11 @@ mod tests {
         let stats = crate::stats::summarize(&evs);
         let e = build_entertainment(&evs, &stats);
         // battleground = hot.rs (3 hits, "cold.rs"=1 and "other.rs"=1 don't beat it)
-        let bg = e.superlatives.iter().find(|s| s.key == "the_battleground").unwrap();
+        let bg = e
+            .superlatives
+            .iter()
+            .find(|s| s.key == "the_battleground")
+            .unwrap();
         assert_eq!(bg.value["file"], "hot.rs");
         // ghost badge awarded to b
         let ghost = e.badges.iter().find(|b| b.id == "ghost").unwrap();

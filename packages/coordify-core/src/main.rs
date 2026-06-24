@@ -38,7 +38,10 @@ fn run(paths: &Paths) -> std::io::Result<()> {
     let _ = std::fs::remove_file(paths.socket());
     let listener = UnixListener::bind(paths.socket())?;
 
-    println!("coordify-core {VERSION} listening on {}", paths.socket().display());
+    println!(
+        "coordify-core {VERSION} listening on {}",
+        paths.socket().display()
+    );
     server::run(Paths::new(&paths.root), sess, token, listener)
 }
 

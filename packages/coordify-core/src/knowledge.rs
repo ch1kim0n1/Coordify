@@ -95,8 +95,11 @@ impl KnowledgeStore {
     /// { "hotzones": {path: score}, "coupling": [{a,b,score}] }, scores = n/(n+k).
     pub fn summary_json(&self, k: f64) -> serde_json::Value {
         let score = |n: u64| (n as f64) / (n as f64 + k);
-        let hotzones: BTreeMap<&String, f64> =
-            self.hotzone_counts.iter().map(|(p, &n)| (p, score(n))).collect();
+        let hotzones: BTreeMap<&String, f64> = self
+            .hotzone_counts
+            .iter()
+            .map(|(p, &n)| (p, score(n)))
+            .collect();
         let mut coupling: Vec<serde_json::Value> = self
             .coupling_counts
             .iter()
@@ -133,7 +136,11 @@ impl KnowledgeStore {
         let edges: Vec<CouplingEdge> = self
             .coupling_counts
             .iter()
-            .map(|((a, b), &count)| CouplingEdge { a: a.clone(), b: b.clone(), count })
+            .map(|((a, b), &count)| CouplingEdge {
+                a: a.clone(),
+                b: b.clone(),
+                count,
+            })
             .collect();
         let cp = serde_json::to_string_pretty(&edges).unwrap_or_else(|_| "[]".into());
         write_atomic(&cp_path, &cp)?;
@@ -192,7 +199,10 @@ pub(crate) fn quarantine(path: &Path, out: &mut Vec<String>) {
     let dir = path.parent().map(|p| p.join("quarantine"));
     if let Some(qdir) = dir {
         let _ = std::fs::create_dir_all(&qdir);
-        let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_else(|| "unknown".into());
+        let name = path
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or_else(|| "unknown".into());
         let stamp = crate::bootstrap::now_iso().replace(':', "-");
         let dest = qdir.join(format!("{name}.{stamp}"));
         if std::fs::rename(path, &dest).is_ok() {
@@ -240,7 +250,9 @@ mod tests {
     #[test]
     fn snapshot_uses_saturating_curve() {
         let mut s = KnowledgeStore::new();
-        for _ in 0..5 { s.record_conflict(&["f".into()]); } // count 5
+        for _ in 0..5 {
+            s.record_conflict(&["f".into()]);
+        } // count 5
         let k = s.snapshot(5.0);
         // 5/(5+5) = 0.5
         assert!((k.hotzone_risk("f") - 0.5).abs() < 1e-9);
@@ -274,25 +286,26 @@ mod tests {
         let mut s = KnowledgeStore::new();
         s.record_conflict(&["a".into()]);
         s.record_claim_files(&["a".into(), "b".into()]); // coupling (a,b) count 1
-        s.save_atomic(&dir).unwrap();          // first write, no prev
+        s.save_atomic(&dir).unwrap(); // first write, no prev
         let mut s2 = KnowledgeStore::new();
         s2.record_conflict(&["a".into()]);
-        s2.record_conflict(&["a".into()]);      // count 2
+        s2.record_conflict(&["a".into()]); // count 2
         s2.record_claim_files(&["a".into(), "b".into()]);
         s2.record_claim_files(&["a".into(), "b".into()]); // coupling (a,b) count 2
-        s2.save_atomic(&dir).unwrap();          // rotates prior (counts 1) to .prev
+        s2.save_atomic(&dir).unwrap(); // rotates prior (counts 1) to .prev
         assert!(dir.join("hotzones.json.prev").exists());
         let prev: HashMap<String, u64> =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("hotzones.json.prev")).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join("hotzones.json.prev")).unwrap())
+                .unwrap();
         assert_eq!(prev.get("a").copied(), Some(1));
         let cur: HashMap<String, u64> =
-            serde_json::from_str(&std::fs::read_to_string(dir.join("hotzones.json")).unwrap()).unwrap();
+            serde_json::from_str(&std::fs::read_to_string(dir.join("hotzones.json")).unwrap())
+                .unwrap();
         assert_eq!(cur.get("a").copied(), Some(2));
         // coupling-graph rotates too (substring assertions on pretty JSON to
         // avoid needing the private CouplingEdge type)
         assert!(dir.join("coupling-graph.json.prev").exists());
-        let cp_prev =
-            std::fs::read_to_string(dir.join("coupling-graph.json.prev")).unwrap();
+        let cp_prev = std::fs::read_to_string(dir.join("coupling-graph.json.prev")).unwrap();
         assert!(cp_prev.contains("\"count\": 1"));
         let cp_cur = std::fs::read_to_string(dir.join("coupling-graph.json")).unwrap();
         assert!(cp_cur.contains("\"count\": 2"));

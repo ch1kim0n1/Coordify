@@ -1,8 +1,8 @@
-use std::collections::HashMap;
-use std::time::{SystemTime, UNIX_EPOCH};
 use crate::cap::AgentState;
 use crate::claim::ClaimStore;
 use crate::heat::HeatInputs;
+use std::collections::HashMap;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 #[derive(Debug, Clone)]
 pub struct Agent {
@@ -23,13 +23,20 @@ pub struct State {
 impl State {
     #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
-        Self { agents: HashMap::new(), claims: ClaimStore::new(), next_id: 1 }
+        Self {
+            agents: HashMap::new(),
+            claims: ClaimStore::new(),
+            next_id: 1,
+        }
     }
 
     pub fn register(&mut self, meta: serde_json::Value, now_ms: u64) -> String {
         let id = format!("agent-{}", self.next_id);
         self.next_id += 1;
-        let branch = meta.get("branch").and_then(|v| v.as_str()).map(String::from);
+        let branch = meta
+            .get("branch")
+            .and_then(|v| v.as_str())
+            .map(String::from);
         self.agents.insert(
             id.clone(),
             Agent {
@@ -46,7 +53,10 @@ impl State {
 
     pub fn heartbeat(&mut self, id: &str, now_ms: u64) -> bool {
         match self.agents.get_mut(id) {
-            Some(a) => { a.last_seen_ms = now_ms; true }
+            Some(a) => {
+                a.last_seen_ms = now_ms;
+                true
+            }
             None => false,
         }
     }
@@ -112,7 +122,9 @@ impl State {
     }
 
     pub fn agents_get_branch_and_seen(&self, id: &str) -> Option<(Option<String>, u64)> {
-        self.agents.get(id).map(|a| (a.branch.clone(), a.last_seen_ms))
+        self.agents
+            .get(id)
+            .map(|a| (a.branch.clone(), a.last_seen_ms))
     }
 
     pub fn heat_inputs_for(&self, agent_id: &str) -> Option<HeatInputs> {
@@ -222,8 +234,14 @@ mod tests {
         // Register agent at now=5000 so idle == timeout (10000-5000 == 5000); must survive.
         let c = s.register(json!({}), 5_000);
         let lost = s.reap(10_000, 5_000);
-        assert!(!lost.contains(&c), "agent idle exactly timeout_ms must survive (strict >)");
-        assert!(s.heartbeat(&c, 11_000), "surviving agent must still be present");
+        assert!(
+            !lost.contains(&c),
+            "agent idle exactly timeout_ms must survive (strict >)"
+        );
+        assert!(
+            s.heartbeat(&c, 11_000),
+            "surviving agent must still be present"
+        );
     }
 
     #[test]
@@ -250,8 +268,14 @@ mod tests {
         // Discovery -> Active is allowed; Discovery -> Testing is not.
         assert!(s.set_state(&id, Active).is_ok());
         assert!(s.set_state(&id, Testing).is_ok()); // Active -> Testing ok
-        assert_eq!(s.set_state(&id, SubagentWaiting), Err(super::StateError::InvalidTransition)); // Testing -> SubagentWaiting not allowed
-        assert_eq!(s.set_state("agent-999", Idle), Err(super::StateError::AgentNotFound));
+        assert_eq!(
+            s.set_state(&id, SubagentWaiting),
+            Err(super::StateError::InvalidTransition)
+        ); // Testing -> SubagentWaiting not allowed
+        assert_eq!(
+            s.set_state("agent-999", Idle),
+            Err(super::StateError::AgentNotFound)
+        );
         // Any -> Offline allowed
         assert!(s.set_state(&id, Offline).is_ok());
     }
@@ -288,7 +312,14 @@ mod tests {
             // no live claim yet -> heat_inputs_for is None
             assert!(s.heat_inputs_for(&id).is_none());
             // give the agent a live claim, then inputs appear with the branch.
-            s.claims.propose(&id, "fix bug".into(), "BUGFIX".into(), vec!["AUTH".into()], vec!["a.rs".into()], 0.9);
+            s.claims.propose(
+                &id,
+                "fix bug".into(),
+                "BUGFIX".into(),
+                vec!["AUTH".into()],
+                vec!["a.rs".into()],
+                0.9,
+            );
             s.heat_inputs_for(&id).unwrap()
         };
         assert_eq!(inp.branch.as_deref(), Some("main"));
@@ -308,7 +339,14 @@ mod tests {
     fn heat_inputs_union_estimated_and_actual_files() {
         let mut st = State::new();
         let id = st.register(serde_json::json!({}), 1000);
-        st.claims.propose(&id, "t".into(), "BUGFIX".into(), vec![], vec!["est.rs".into()], 0.9);
+        st.claims.propose(
+            &id,
+            "t".into(),
+            "BUGFIX".into(),
+            vec![],
+            vec!["est.rs".into()],
+            0.9,
+        );
         st.promote_active(&id);
         st.claims.record_touched(&id, &["act.rs".into()]);
         let inputs = st.heat_inputs_for(&id).unwrap();

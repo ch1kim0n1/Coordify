@@ -223,7 +223,15 @@ pub fn compute_heat(
 mod tests {
     use super::*;
 
-    fn inputs(agent: &str, intent: &str, files: &[&str], domains: &[&str], task: &str, last_seen: u64, branch: Option<&str>) -> HeatInputs {
+    fn inputs(
+        agent: &str,
+        intent: &str,
+        files: &[&str],
+        domains: &[&str],
+        task: &str,
+        last_seen: u64,
+        branch: Option<&str>,
+    ) -> HeatInputs {
         HeatInputs {
             agent_id: agent.to_string(),
             intent: intent.to_string(),
@@ -238,7 +246,10 @@ mod tests {
     #[test]
     fn tokens_are_lowercased_words() {
         let t = tokens("Fix Auth-token Expiry!");
-        let expected: BTreeSet<String> = ["fix", "auth", "token", "expiry"].iter().map(|s| s.to_string()).collect();
+        let expected: BTreeSet<String> = ["fix", "auth", "token", "expiry"]
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         assert_eq!(t, expected);
     }
 
@@ -247,8 +258,24 @@ mod tests {
         // same intent, same single file, same domain, same task, same time, same branch; empty knowledge.
         let cfg = HeatConfig::default();
         let k = Knowledge::default();
-        let a = inputs("agent-1", "BUGFIX", &["src/auth/session.ts"], &["AUTH"], "fix session expiry", 1000, Some("main"));
-        let b = inputs("agent-2", "BUGFIX", &["src/auth/session.ts"], &["AUTH"], "fix session expiry", 1000, Some("main"));
+        let a = inputs(
+            "agent-1",
+            "BUGFIX",
+            &["src/auth/session.ts"],
+            &["AUTH"],
+            "fix session expiry",
+            1000,
+            Some("main"),
+        );
+        let b = inputs(
+            "agent-2",
+            "BUGFIX",
+            &["src/auth/session.ts"],
+            &["AUTH"],
+            "fix session expiry",
+            1000,
+            Some("main"),
+        );
         let r = compute_heat(&a, &b, &k, &cfg);
         // task .10 + intent .15 + domain .15 + file .20 + temporal .10 + branch .10 = 0.80 -> 80
         assert_eq!(r.heat, 80);
@@ -262,8 +289,24 @@ mod tests {
         let cfg = HeatConfig::default();
         let k = Knowledge::default();
         // different intent, no shared files/domains/task, far apart in time, different branch.
-        let a = inputs("agent-1", "BUGFIX", &["src/a.rs"], &["AUTH"], "alpha", 0, Some("feature-a"));
-        let b = inputs("agent-2", "DOCUMENTATION", &["docs/b.md"], &["DOCS"], "beta", 10_000_000, Some("feature-b"));
+        let a = inputs(
+            "agent-1",
+            "BUGFIX",
+            &["src/a.rs"],
+            &["AUTH"],
+            "alpha",
+            0,
+            Some("feature-a"),
+        );
+        let b = inputs(
+            "agent-2",
+            "DOCUMENTATION",
+            &["docs/b.md"],
+            &["DOCS"],
+            "beta",
+            10_000_000,
+            Some("feature-b"),
+        );
         let r = compute_heat(&a, &b, &k, &cfg);
         assert_eq!(r.heat, 0);
         assert_eq!(r.band, HeatBand::Safe);
@@ -314,8 +357,24 @@ mod tests {
         let mut k = Knowledge::default();
         k.hotzones.insert("src/auth/session.ts".to_string(), 1.0);
         // a and b share the file; hotzone risk 1.0 contributes 0.10 -> +10.
-        let a = inputs("agent-1", "BUGFIX", &["src/auth/session.ts"], &[], "", 0, None);
-        let b = inputs("agent-2", "BUGFIX", &["src/auth/session.ts"], &[], "", 10_000_000, None);
+        let a = inputs(
+            "agent-1",
+            "BUGFIX",
+            &["src/auth/session.ts"],
+            &[],
+            "",
+            0,
+            None,
+        );
+        let b = inputs(
+            "agent-2",
+            "BUGFIX",
+            &["src/auth/session.ts"],
+            &[],
+            "",
+            10_000_000,
+            None,
+        );
         let r = compute_heat(&a, &b, &k, &cfg);
         // intent .15 (15) + file 1.0*.20 (20) + hotzone 1.0*.10 (10) = 45 -> MONITOR
         assert_eq!(r.heat, 45);
@@ -329,7 +388,11 @@ mod tests {
             (Safe, "SAFE", "PROCEED"),
             (Monitor, "MONITOR", "MONITOR"),
             (Overlap, "OVERLAP", "SPLIT_SCOPE_OR_SEQUENCE"),
-            (ConflictCandidate, "CONFLICT_CANDIDATE", "NEGOTIATE_BEFORE_CLAIM"),
+            (
+                ConflictCandidate,
+                "CONFLICT_CANDIDATE",
+                "NEGOTIATE_BEFORE_CLAIM",
+            ),
         ];
         for (b, s, rec) in cases {
             assert_eq!(b.as_str(), s);

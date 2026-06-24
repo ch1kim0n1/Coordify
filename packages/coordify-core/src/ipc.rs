@@ -30,16 +30,40 @@ pub struct Response {
 
 impl Response {
     pub fn ok_for(id: &str) -> Self {
-        Self { id: id.to_string(), ok: true, agent_id: None, error: None, data: None }
+        Self {
+            id: id.to_string(),
+            ok: true,
+            agent_id: None,
+            error: None,
+            data: None,
+        }
     }
     pub fn ok_with_agent(id: &str, agent_id: &str) -> Self {
-        Self { id: id.to_string(), ok: true, agent_id: Some(agent_id.to_string()), error: None, data: None }
+        Self {
+            id: id.to_string(),
+            ok: true,
+            agent_id: Some(agent_id.to_string()),
+            error: None,
+            data: None,
+        }
     }
     pub fn err(id: &str, msg: &str) -> Self {
-        Self { id: id.to_string(), ok: false, agent_id: None, error: Some(msg.to_string()), data: None }
+        Self {
+            id: id.to_string(),
+            ok: false,
+            agent_id: None,
+            error: Some(msg.to_string()),
+            data: None,
+        }
     }
     pub fn ok_with_data(id: &str, data: Value) -> Self {
-        Self { id: id.to_string(), ok: true, agent_id: None, error: None, data: Some(data) }
+        Self {
+            id: id.to_string(),
+            ok: true,
+            agent_id: None,
+            error: None,
+            data: Some(data),
+        }
     }
 }
 
@@ -93,7 +117,10 @@ mod tests {
         let req = decode_request(line).unwrap();
         assert_eq!(req.cap_version, None);
         // ok_for omits data
-        assert_eq!(encode_response(&Response::ok_for("r1")), r#"{"id":"r1","ok":true}"#);
+        assert_eq!(
+            encode_response(&Response::ok_for("r1")),
+            r#"{"id":"r1","ok":true}"#
+        );
         // ok_with_data includes it
         let r = Response::ok_with_data("r1", serde_json::json!({"claimId":"claim-1"}));
         assert!(encode_response(&r).contains(r#""data":{"claimId":"claim-1"}"#));

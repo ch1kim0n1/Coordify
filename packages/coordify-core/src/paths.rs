@@ -49,9 +49,18 @@ mod tests {
     #[test]
     fn derives_runtime_and_session_paths() {
         let p = Paths::new("/tmp/proj");
-        assert_eq!(p.socket(), PathBuf::from("/tmp/proj/.coordify/runtime/core.sock"));
-        assert_eq!(p.lock(), PathBuf::from("/tmp/proj/.coordify/runtime/core.lock"));
-        assert_eq!(p.token(), PathBuf::from("/tmp/proj/.coordify/runtime/session.token"));
+        assert_eq!(
+            p.socket(),
+            PathBuf::from("/tmp/proj/.coordify/runtime/core.sock")
+        );
+        assert_eq!(
+            p.lock(),
+            PathBuf::from("/tmp/proj/.coordify/runtime/core.lock")
+        );
+        assert_eq!(
+            p.token(),
+            PathBuf::from("/tmp/proj/.coordify/runtime/session.token")
+        );
         assert_eq!(
             p.session_dir("2026-06-22_18-42-11"),
             PathBuf::from("/tmp/proj/.coordify/sessions/2026-06-22_18-42-11")

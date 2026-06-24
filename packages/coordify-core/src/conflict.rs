@@ -68,7 +68,10 @@ pub struct ConflictStore {
 
 impl ConflictStore {
     pub fn new() -> Self {
-        Self { open: HashMap::new(), next_id: 0 }
+        Self {
+            open: HashMap::new(),
+            next_id: 0,
+        }
     }
 
     pub fn has_open(&self, a: &str, b: &str) -> bool {
@@ -193,7 +196,8 @@ impl ConflictStore {
             .values()
             .filter(|c| {
                 now_ms.saturating_sub(c.opened_at_ms) > timeout_ms
-                    && !(c.proposals.contains_key(&c.agents.0) && c.proposals.contains_key(&c.agents.1))
+                    && !(c.proposals.contains_key(&c.agents.0)
+                        && c.proposals.contains_key(&c.agents.1))
                     && matches!(
                         c.state,
                         ConflictState::Detected
@@ -219,7 +223,11 @@ pub struct ConflictConfig {
 
 impl Default for ConflictConfig {
     fn default() -> Self {
-        Self { protected_paths: Vec::new(), allow_co_own: true, proposal_timeout_ms: 60_000 }
+        Self {
+            protected_paths: Vec::new(),
+            allow_co_own: true,
+            proposal_timeout_ms: 60_000,
+        }
     }
 }
 
@@ -256,36 +264,56 @@ fn protected(paths: &[String], cfg: &ConflictConfig) -> bool {
 pub fn compare(a: &Proposal, b: &Proposal, paths: &[String], cfg: &ConflictConfig) -> Decision {
     use ProposalKind::*;
     if a.requires_user_approval || b.requires_user_approval {
-        return Decision::Escalate { reason: "USER_APPROVAL_REQUIRED" };
+        return Decision::Escalate {
+            reason: "USER_APPROVAL_REQUIRED",
+        };
     }
     if a.kind == AskUser || b.kind == AskUser {
-        return Decision::Escalate { reason: "AGENT_REQUESTED_USER" };
+        return Decision::Escalate {
+            reason: "AGENT_REQUESTED_USER",
+        };
     }
     if protected(paths, cfg) {
-        return Decision::Escalate { reason: "PROTECTED_PATH" };
+        return Decision::Escalate {
+            reason: "PROTECTED_PATH",
+        };
     }
     let steps_aside = |k: ProposalKind| matches!(k, YieldClaim | AbortTask | TransferTask);
     if steps_aside(a.kind) || steps_aside(b.kind) {
-        return Decision::AutoResolve { resolution: "PARTICIPANT_STEPPED_ASIDE" };
+        return Decision::AutoResolve {
+            resolution: "PARTICIPANT_STEPPED_ASIDE",
+        };
     }
     if (a.kind == QueueTask) ^ (b.kind == QueueTask) {
-        return Decision::AutoResolve { resolution: "QUEUED" };
+        return Decision::AutoResolve {
+            resolution: "QUEUED",
+        };
     }
     if a.kind == SplitScope && b.kind == SplitScope {
         return if proposal_files(a).is_disjoint(&proposal_files(b)) {
-            Decision::AutoResolve { resolution: "SCOPE_SPLIT" }
+            Decision::AutoResolve {
+                resolution: "SCOPE_SPLIT",
+            }
         } else {
-            Decision::Escalate { reason: "OVERLAPPING_SPLIT" }
+            Decision::Escalate {
+                reason: "OVERLAPPING_SPLIT",
+            }
         };
     }
     if a.kind == CoOwn && b.kind == CoOwn {
         return if cfg.allow_co_own {
-            Decision::AutoResolve { resolution: "CO_OWNERSHIP" }
+            Decision::AutoResolve {
+                resolution: "CO_OWNERSHIP",
+            }
         } else {
-            Decision::Escalate { reason: "CO_OWN_DISALLOWED" }
+            Decision::Escalate {
+                reason: "CO_OWN_DISALLOWED",
+            }
         };
     }
-    Decision::Escalate { reason: "INCOMPATIBLE_PROPOSALS" }
+    Decision::Escalate {
+        reason: "INCOMPATIBLE_PROPOSALS",
+    }
 }
 
 #[cfg(test)]
@@ -295,22 +323,38 @@ mod tests {
     #[test]
     fn state_as_str_values() {
         assert_eq!(ConflictState::Detected.as_str(), "DETECTED");
-        assert_eq!(ConflictState::AwaitingUserDecision.as_str(), "AWAITING_USER_DECISION");
+        assert_eq!(
+            ConflictState::AwaitingUserDecision.as_str(),
+            "AWAITING_USER_DECISION"
+        );
         assert_eq!(ConflictState::Aborted.as_str(), "ABORTED");
-        assert_eq!(serde_json::to_value(ConflictState::Resolved).unwrap(), serde_json::json!("RESOLVED"));
+        assert_eq!(
+            serde_json::to_value(ConflictState::Resolved).unwrap(),
+            serde_json::json!("RESOLVED")
+        );
     }
 
     #[test]
     fn open_is_idempotent_per_pair_and_direction_independent() {
         let mut s = ConflictStore::new();
-        let c1 = s.open("agent-2", "agent-1", 80, 0, vec!["f".into()], vec!["AUTH".into()], vec!["BUGFIX".into()]);
+        let c1 = s.open(
+            "agent-2",
+            "agent-1",
+            80,
+            0,
+            vec!["f".into()],
+            vec!["AUTH".into()],
+            vec!["BUGFIX".into()],
+        );
         assert!(c1.is_some());
         let c = c1.unwrap();
         assert_eq!(c.conflict_id, "conflict-1");
         assert_eq!(c.agents, ("agent-1".to_string(), "agent-2".to_string())); // ordered
         assert_eq!(c.state, ConflictState::Detected);
         // Same pair, reversed order: already open -> None.
-        assert!(s.open("agent-1", "agent-2", 90, 0, vec![], vec![], vec![]).is_none());
+        assert!(s
+            .open("agent-1", "agent-2", 90, 0, vec![], vec![], vec![])
+            .is_none());
         assert_eq!(s.open_count(), 1);
         assert!(s.has_open("agent-1", "agent-2"));
     }
@@ -341,8 +385,12 @@ mod tests {
     #[test]
     fn ids_are_sequential_across_opens() {
         let mut s = ConflictStore::new();
-        let a = s.open("agent-1", "agent-2", 80, 0, vec![], vec![], vec![]).unwrap();
-        let b = s.open("agent-3", "agent-4", 80, 0, vec![], vec![], vec![]).unwrap();
+        let a = s
+            .open("agent-1", "agent-2", 80, 0, vec![], vec![], vec![])
+            .unwrap();
+        let b = s
+            .open("agent-3", "agent-4", 80, 0, vec![], vec![], vec![])
+            .unwrap();
         assert_eq!(a.conflict_id, "conflict-1");
         assert_eq!(b.conflict_id, "conflict-2");
     }
@@ -365,7 +413,9 @@ mod tests {
     #[test]
     fn open_records_opened_at_and_empty_proposals() {
         let mut s = ConflictStore::new();
-        let c = s.open("a", "b", 80, 12345, vec!["f".into()], vec![], vec![]).unwrap();
+        let c = s
+            .open("a", "b", 80, 12345, vec!["f".into()], vec![], vec![])
+            .unwrap();
         assert_eq!(c.opened_at_ms, 12345);
         assert!(c.proposals.is_empty());
         assert_eq!(c.state, ConflictState::Detected);
@@ -388,7 +438,10 @@ mod tests {
     #[test]
     fn set_state_resolve_by_id_and_timed_out() {
         let mut s = ConflictStore::new();
-        let id = s.open("a", "b", 80, 1000, vec![], vec![], vec![]).unwrap().conflict_id;
+        let id = s
+            .open("a", "b", 80, 1000, vec![], vec![], vec![])
+            .unwrap()
+            .conflict_id;
         // not timed out yet
         assert!(s.timed_out(1500, 1000).is_empty());
         // age 1001 > 1000 -> timed out (no proposals)
@@ -406,38 +459,129 @@ mod tests {
         let cfg = ConflictConfig::default();
         let no_paths: Vec<String> = vec![];
         // requiresUserApproval -> escalate
-        let mut p = prop(ProposalKind::CoOwn, &[]); p.requires_user_approval = true;
-        assert_eq!(compare(&p, &prop(ProposalKind::CoOwn, &[]), &no_paths, &cfg),
-                   Decision::Escalate { reason: "USER_APPROVAL_REQUIRED" });
+        let mut p = prop(ProposalKind::CoOwn, &[]);
+        p.requires_user_approval = true;
+        assert_eq!(
+            compare(&p, &prop(ProposalKind::CoOwn, &[]), &no_paths, &cfg),
+            Decision::Escalate {
+                reason: "USER_APPROVAL_REQUIRED"
+            }
+        );
         // ASK_USER -> escalate
-        assert_eq!(compare(&prop(ProposalKind::AskUser, &[]), &prop(ProposalKind::CoOwn, &[]), &no_paths, &cfg),
-                   Decision::Escalate { reason: "AGENT_REQUESTED_USER" });
+        assert_eq!(
+            compare(
+                &prop(ProposalKind::AskUser, &[]),
+                &prop(ProposalKind::CoOwn, &[]),
+                &no_paths,
+                &cfg
+            ),
+            Decision::Escalate {
+                reason: "AGENT_REQUESTED_USER"
+            }
+        );
         // protected path -> escalate
-        let pcfg = ConflictConfig { protected_paths: vec!["src/auth/".into()], ..ConflictConfig::default() };
-        assert_eq!(compare(&prop(ProposalKind::CoOwn, &[]), &prop(ProposalKind::CoOwn, &[]),
-                           &["src/auth/session.ts".to_string()], &pcfg),
-                   Decision::Escalate { reason: "PROTECTED_PATH" });
+        let pcfg = ConflictConfig {
+            protected_paths: vec!["src/auth/".into()],
+            ..ConflictConfig::default()
+        };
+        assert_eq!(
+            compare(
+                &prop(ProposalKind::CoOwn, &[]),
+                &prop(ProposalKind::CoOwn, &[]),
+                &["src/auth/session.ts".to_string()],
+                &pcfg
+            ),
+            Decision::Escalate {
+                reason: "PROTECTED_PATH"
+            }
+        );
         // one yields -> auto-resolve
-        assert_eq!(compare(&prop(ProposalKind::YieldClaim, &[]), &prop(ProposalKind::CoOwn, &[]), &no_paths, &cfg),
-                   Decision::AutoResolve { resolution: "PARTICIPANT_STEPPED_ASIDE" });
+        assert_eq!(
+            compare(
+                &prop(ProposalKind::YieldClaim, &[]),
+                &prop(ProposalKind::CoOwn, &[]),
+                &no_paths,
+                &cfg
+            ),
+            Decision::AutoResolve {
+                resolution: "PARTICIPANT_STEPPED_ASIDE"
+            }
+        );
         // exactly one queue -> auto-resolve
-        assert_eq!(compare(&prop(ProposalKind::QueueTask, &[]), &prop(ProposalKind::CoOwn, &[]), &no_paths, &cfg),
-                   Decision::AutoResolve { resolution: "QUEUED" });
+        assert_eq!(
+            compare(
+                &prop(ProposalKind::QueueTask, &[]),
+                &prop(ProposalKind::CoOwn, &[]),
+                &no_paths,
+                &cfg
+            ),
+            Decision::AutoResolve {
+                resolution: "QUEUED"
+            }
+        );
         // both split disjoint -> auto-resolve
-        assert_eq!(compare(&prop(ProposalKind::SplitScope, &["a.rs"]), &prop(ProposalKind::SplitScope, &["b.rs"]), &no_paths, &cfg),
-                   Decision::AutoResolve { resolution: "SCOPE_SPLIT" });
+        assert_eq!(
+            compare(
+                &prop(ProposalKind::SplitScope, &["a.rs"]),
+                &prop(ProposalKind::SplitScope, &["b.rs"]),
+                &no_paths,
+                &cfg
+            ),
+            Decision::AutoResolve {
+                resolution: "SCOPE_SPLIT"
+            }
+        );
         // both split overlapping -> escalate
-        assert_eq!(compare(&prop(ProposalKind::SplitScope, &["a.rs"]), &prop(ProposalKind::SplitScope, &["a.rs"]), &no_paths, &cfg),
-                   Decision::Escalate { reason: "OVERLAPPING_SPLIT" });
+        assert_eq!(
+            compare(
+                &prop(ProposalKind::SplitScope, &["a.rs"]),
+                &prop(ProposalKind::SplitScope, &["a.rs"]),
+                &no_paths,
+                &cfg
+            ),
+            Decision::Escalate {
+                reason: "OVERLAPPING_SPLIT"
+            }
+        );
         // both co-own, allowed -> auto-resolve
-        assert_eq!(compare(&prop(ProposalKind::CoOwn, &[]), &prop(ProposalKind::CoOwn, &[]), &no_paths, &cfg),
-                   Decision::AutoResolve { resolution: "CO_OWNERSHIP" });
+        assert_eq!(
+            compare(
+                &prop(ProposalKind::CoOwn, &[]),
+                &prop(ProposalKind::CoOwn, &[]),
+                &no_paths,
+                &cfg
+            ),
+            Decision::AutoResolve {
+                resolution: "CO_OWNERSHIP"
+            }
+        );
         // both co-own, disallowed -> escalate
-        let nocoown = ConflictConfig { allow_co_own: false, ..ConflictConfig::default() };
-        assert_eq!(compare(&prop(ProposalKind::CoOwn, &[]), &prop(ProposalKind::CoOwn, &[]), &no_paths, &nocoown),
-                   Decision::Escalate { reason: "CO_OWN_DISALLOWED" });
+        let nocoown = ConflictConfig {
+            allow_co_own: false,
+            ..ConflictConfig::default()
+        };
+        assert_eq!(
+            compare(
+                &prop(ProposalKind::CoOwn, &[]),
+                &prop(ProposalKind::CoOwn, &[]),
+                &no_paths,
+                &nocoown
+            ),
+            Decision::Escalate {
+                reason: "CO_OWN_DISALLOWED"
+            }
+        );
         // mixed incompatible (co-own vs split) -> escalate
-        assert_eq!(compare(&prop(ProposalKind::CoOwn, &[]), &prop(ProposalKind::SplitScope, &["a.rs"]), &no_paths, &cfg),
-                   Decision::Escalate { reason: "INCOMPATIBLE_PROPOSALS" });
+        assert_eq!(
+            compare(
+                &prop(ProposalKind::CoOwn, &[]),
+                &prop(ProposalKind::SplitScope, &["a.rs"]),
+                &no_paths,
+                &cfg
+            ),
+            Decision::Escalate {
+                reason: "INCOMPATIBLE_PROPOSALS"
+            }
+        );
     }
 }

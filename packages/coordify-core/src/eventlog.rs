@@ -40,8 +40,10 @@ mod tests {
     fn appends_one_json_object_per_line() {
         let path = temp_path("append");
         let mut log = EventLog::create(path.clone()).unwrap();
-        log.append(&json!({"type": "AGENT_JOINED", "agentId": "agent-1"})).unwrap();
-        log.append(&json!({"type": "AGENT_LEFT", "agentId": "agent-1"})).unwrap();
+        log.append(&json!({"type": "AGENT_JOINED", "agentId": "agent-1"}))
+            .unwrap();
+        log.append(&json!({"type": "AGENT_LEFT", "agentId": "agent-1"}))
+            .unwrap();
 
         let contents = fs::read_to_string(&path).unwrap();
         let lines: Vec<&str> = contents.lines().collect();

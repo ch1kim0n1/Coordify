@@ -169,7 +169,11 @@ mod tests {
         g.add_edge("x", "a", "r0"); // tail leading into the loop
         g.add_edge("a", "a", "r1"); // self-loop
         let cyc = g.find_cycle().expect("self-loop is a cycle");
-        assert_eq!(cyc.len(), 1, "cycle must be just the self edge, not the tail");
+        assert_eq!(
+            cyc.len(),
+            1,
+            "cycle must be just the self edge, not the tail"
+        );
         assert_eq!(cyc[0].from, "a");
         assert_eq!(cyc[0].to, "a");
     }

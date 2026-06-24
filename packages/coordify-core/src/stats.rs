@@ -18,7 +18,9 @@ fn ev_pair(e: &Value, key: &str) -> Option<(String, String)> {
     }
 }
 fn parse_ms(ts: &str) -> Option<i64> {
-    chrono::DateTime::parse_from_rfc3339(ts).ok().map(|dt| dt.timestamp_millis())
+    chrono::DateTime::parse_from_rfc3339(ts)
+        .ok()
+        .map(|dt| dt.timestamp_millis())
 }
 
 #[derive(Debug, Default, Clone, Serialize)]
@@ -129,13 +131,19 @@ pub fn summarize(events: &[Value]) -> SessionStats {
             }
             "CLAIM_CREATED" => {
                 s.claims_created += 1;
-                s.agents.entry(ev_str(e, "agentId")).or_default().claims_made += 1;
+                s.agents
+                    .entry(ev_str(e, "agentId"))
+                    .or_default()
+                    .claims_made += 1;
             }
             "CLAIM_REJECTED" => s.claims_rejected += 1,
             "CLAIM_RELEASED" => {
                 s.claims_released += 1;
                 if ev_str(e, "reason") == "TASK_COMPLETED" {
-                    s.agents.entry(ev_str(e, "agentId")).or_default().tasks_completed += 1;
+                    s.agents
+                        .entry(ev_str(e, "agentId"))
+                        .or_default()
+                        .tasks_completed += 1;
                 }
             }
             "CLAIM_ORPHANED" => {
@@ -164,7 +172,11 @@ pub fn summarize(events: &[Value]) -> SessionStats {
                     }
                     // Strictly-greater keeps the earliest occurrence of the max (events are in order).
                     if heat > s.peak_heat.heat {
-                        s.peak_heat = PeakHeat { heat, pair: vec![a, b], ts: ev_str(e, "ts") };
+                        s.peak_heat = PeakHeat {
+                            heat,
+                            pair: vec![a, b],
+                            ts: ev_str(e, "ts"),
+                        };
                     }
                 }
             }
@@ -200,7 +212,10 @@ pub fn summarize(events: &[Value]) -> SessionStats {
                 if let Some(arr) = e.get("agents").and_then(|v| v.as_array()) {
                     for id in arr {
                         if let Some(x) = id.as_str() {
-                            s.agents.entry(x.to_string()).or_default().deadlocks_involved += 1;
+                            s.agents
+                                .entry(x.to_string())
+                                .or_default()
+                                .deadlocks_involved += 1;
                         }
                     }
                 }
@@ -341,7 +356,7 @@ mod tests {
         assert_eq!(s.conflicts_opened, 1);
         assert_eq!(s.negotiated_resolved, 1);
         assert_eq!(s.peak_heat.heat, 82);
-        assert_eq!(s.peak_heat.pair, vec!["agent-1","agent-2"]);
+        assert_eq!(s.peak_heat.pair, vec!["agent-1", "agent-2"]);
         assert_eq!(s.duration_ms, 9000); // 00:00:00 -> 00:00:09
         let a1 = s.agents.get("agent-1").unwrap();
         assert_eq!(a1.claims_made, 1);
@@ -361,7 +376,7 @@ mod tests {
             json!({"type":"HEAT_UPDATED","pair":["c","d"],"heat":50,"band":"OVERLAP","ts":"2026-06-23T00:00:02Z"}),
         ];
         let s = summarize(&evs);
-        assert_eq!(s.peak_heat.pair, vec!["a","b"]); // earliest of the tie
+        assert_eq!(s.peak_heat.pair, vec!["a", "b"]); // earliest of the tie
     }
 
     #[test]
@@ -424,7 +439,17 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cp-{}-{}", std::process::id(), 1));
         let _ = std::fs::remove_dir_all(&dir);
         let mut tallies: BTreeMap<String, AgentTally> = BTreeMap::new();
-        tallies.insert("agent-1".into(), AgentTally { claims_made: 2, tasks_completed: 2, heat_generated_sum: 100, heat_generated_count: 4, conflicts_involved: 1, ..Default::default() });
+        tallies.insert(
+            "agent-1".into(),
+            AgentTally {
+                claims_made: 2,
+                tasks_completed: 2,
+                heat_generated_sum: 100,
+                heat_generated_count: 4,
+                conflicts_involved: 1,
+                ..Default::default()
+            },
+        );
 
         let (mut store, q) = ProfileStore::load(&dir);
         assert!(q.is_empty());
@@ -445,9 +470,12 @@ mod tests {
         // derived velocity + overhead written
         let vel = std::fs::read_to_string(dir.join("velocity-profiles.json")).unwrap();
         assert!(vel.contains("tasksPerSession"));
-        let ovh: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("coordination-overhead.json")).unwrap()).unwrap();
+        let ovh: serde_json::Value = serde_json::from_str(
+            &std::fs::read_to_string(dir.join("coordination-overhead.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(ovh["agent-1"]["overheadScore"], 2); // conflicts 1+1, arb 0, deadlock 0
-        // prev rotation of agent-profiles
+                                                        // prev rotation of agent-profiles
         assert!(dir.join("agent-profiles.json.prev").exists());
         let _ = std::fs::remove_dir_all(&dir);
     }
@@ -510,7 +538,7 @@ mod tests {
         assert_eq!(s.negotiated_resolved, 1); // CO_OWNERSHIP
         assert_eq!(s.escalated, 1);
         assert_eq!(s.heat_updates, 5); // all five HEAT_UPDATED events increment heat_updates
-        assert_eq!(s.deadlocks, 2);     // both DEADLOCK_DETECTED events
+        assert_eq!(s.deadlocks, 2); // both DEADLOCK_DETECTED events
         assert_eq!(s.arbitrations_requested, 1); // still incremented with malformed agents
         assert_eq!(s.files_touched, 0); // non-string file element skipped
     }
@@ -522,11 +550,14 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("cp-{}-{}", std::process::id(), 3));
         let _ = std::fs::remove_dir_all(&dir);
         let mut store = ProfileStore::default();
-        store.agents.insert("zero-agent".into(), AgentProfile::default());
+        store
+            .agents
+            .insert("zero-agent".into(), AgentProfile::default());
         store.save_atomic(&dir).unwrap();
         let vel: serde_json::Value = serde_json::from_str(
-            &std::fs::read_to_string(dir.join("velocity-profiles.json")).unwrap()
-        ).unwrap();
+            &std::fs::read_to_string(dir.join("velocity-profiles.json")).unwrap(),
+        )
+        .unwrap();
         assert_eq!(vel["zero-agent"]["tasksPerSession"], 0.0);
         assert_eq!(vel["zero-agent"]["meanHeatGenerated"], 0.0);
         let _ = std::fs::remove_dir_all(&dir);

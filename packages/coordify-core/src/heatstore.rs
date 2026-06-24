@@ -16,7 +16,9 @@ pub struct HeatStore {
 
 impl HeatStore {
     pub fn new() -> Self {
-        Self { edges: HashMap::new() }
+        Self {
+            edges: HashMap::new(),
+        }
     }
 
     pub fn upsert(&mut self, a: &str, b: &str, result: HeatResult) {
@@ -45,11 +47,13 @@ impl HeatStore {
     pub fn snapshot(&self) -> Vec<serde_json::Value> {
         self.edges
             .iter()
-            .map(|((a, b), r)| serde_json::json!({
-                "pair": [a, b],
-                "heat": r.heat,
-                "band": r.band.as_str()
-            }))
+            .map(|((a, b), r)| {
+                serde_json::json!({
+                    "pair": [a, b],
+                    "heat": r.heat,
+                    "band": r.band.as_str()
+                })
+            })
             .collect()
     }
 }

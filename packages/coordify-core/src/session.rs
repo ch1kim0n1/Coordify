@@ -29,7 +29,13 @@ pub fn finalize(session: &Session, paths: &Paths, agents_seen: u64) -> std::io::
         serde_json::to_string_pretty(&final_doc)?,
     )?;
     // Remove runtime files; not-found is fine (already gone / never created).
-    for p in [paths.socket(), paths.lock(), paths.token(), paths.pid(), paths.live_state()] {
+    for p in [
+        paths.socket(),
+        paths.lock(),
+        paths.token(),
+        paths.pid(),
+        paths.live_state(),
+    ] {
         if let Err(e) = fs::remove_file(&p) {
             if e.kind() != std::io::ErrorKind::NotFound {
                 return Err(e);
@@ -92,7 +98,10 @@ mod tests {
     #[test]
     fn create_session_fails_when_parent_is_a_file() {
         let mut base = std::env::temp_dir();
-        base.push(format!("coordify-session-parentfile-{}", std::process::id()));
+        base.push(format!(
+            "coordify-session-parentfile-{}",
+            std::process::id()
+        ));
         let _ = fs::remove_file(&base);
         let _ = fs::remove_dir_all(&base);
         // Write a plain file at `base`.  Paths::new will resolve sessions() as
@@ -102,7 +111,10 @@ mod tests {
         // Build a Paths whose root == base (which is a file, not a dir).
         let paths = Paths::new(&base);
         let result = create_session(&paths, "2026-06-22_00-00-00".to_string());
-        assert!(result.is_err(), "expected Err when sessions dir cannot be created");
+        assert!(
+            result.is_err(),
+            "expected Err when sessions dir cannot be created"
+        );
         let _ = fs::remove_file(&base);
     }
 
@@ -118,7 +130,10 @@ mod tests {
             dir: ghost_dir,
         };
         let result = finalize(&session, &paths, 1);
-        assert!(result.is_err(), "expected Err when session dir does not exist");
+        assert!(
+            result.is_err(),
+            "expected Err when session dir does not exist"
+        );
         let _ = fs::remove_dir_all(&root);
     }
 }

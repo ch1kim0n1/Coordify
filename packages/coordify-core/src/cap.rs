@@ -195,14 +195,9 @@ pub enum CapEvent {
         reason: ReleaseReason,
     },
     #[serde(rename_all = "camelCase")]
-    AgentStateChanged {
-        agent_id: String,
-        state: AgentState,
-    },
+    AgentStateChanged { agent_id: String, state: AgentState },
     #[serde(rename_all = "camelCase")]
-    ClearInvoked {
-        agent_id: String,
-    },
+    ClearInvoked { agent_id: String },
     #[serde(rename_all = "camelCase")]
     ConflictProposalSubmitted {
         conflict_id: String,
@@ -210,10 +205,7 @@ pub enum CapEvent {
         proposal: Proposal,
     },
     #[serde(rename_all = "camelCase")]
-    ConflictUserDecision {
-        conflict_id: String,
-        choice: String,
-    },
+    ConflictUserDecision { conflict_id: String, choice: String },
     #[serde(rename_all = "camelCase")]
     FileTouched {
         agent_id: String,
@@ -234,17 +226,41 @@ mod tests {
 
     #[test]
     fn canonical_enum_strings_match_cap_spec() {
-        assert_eq!(serde_json::to_value(AgentState::SubagentWaiting).unwrap(), json!("SUBAGENT_WAITING"));
-        assert_eq!(serde_json::to_value(AgentState::WaitingUser).unwrap(), json!("WAITING_USER"));
-        assert_eq!(serde_json::to_value(AgentState::Discovery).unwrap(), json!("DISCOVERY"));
+        assert_eq!(
+            serde_json::to_value(AgentState::SubagentWaiting).unwrap(),
+            json!("SUBAGENT_WAITING")
+        );
+        assert_eq!(
+            serde_json::to_value(AgentState::WaitingUser).unwrap(),
+            json!("WAITING_USER")
+        );
+        assert_eq!(
+            serde_json::to_value(AgentState::Discovery).unwrap(),
+            json!("DISCOVERY")
+        );
         assert_eq!(serde_json::to_value(Intent::Qa).unwrap(), json!("QA"));
-        assert_eq!(serde_json::to_value(Intent::Devops).unwrap(), json!("DEVOPS"));
-        assert_eq!(serde_json::to_value(Intent::Bugfix).unwrap(), json!("BUGFIX"));
+        assert_eq!(
+            serde_json::to_value(Intent::Devops).unwrap(),
+            json!("DEVOPS")
+        );
+        assert_eq!(
+            serde_json::to_value(Intent::Bugfix).unwrap(),
+            json!("BUGFIX")
+        );
         assert_eq!(Intent::Qa.as_str(), "QA");
         assert_eq!(ClaimStatus::Reclaimable.as_str(), "RECLAIMABLE");
-        assert_eq!(serde_json::to_value(ReleaseReason::ClearInvoked).unwrap(), json!("CLEAR_INVOKED"));
-        assert_eq!(CapErrorCode::SchemaValidationFailed.as_str(), "SCHEMA_VALIDATION_FAILED");
-        assert_eq!(CapErrorCode::UnsupportedCapVersion.as_str(), "UNSUPPORTED_CAP_VERSION");
+        assert_eq!(
+            serde_json::to_value(ReleaseReason::ClearInvoked).unwrap(),
+            json!("CLEAR_INVOKED")
+        );
+        assert_eq!(
+            CapErrorCode::SchemaValidationFailed.as_str(),
+            "SCHEMA_VALIDATION_FAILED"
+        );
+        assert_eq!(
+            CapErrorCode::UnsupportedCapVersion.as_str(),
+            "UNSUPPORTED_CAP_VERSION"
+        );
     }
 
     #[test]
@@ -258,7 +274,14 @@ mod tests {
             "confidence": 0.86
         });
         match decode_event(&ev).unwrap() {
-            CapEvent::ClaimProposed { agent_id, intent, domains, estimated_files, confidence, .. } => {
+            CapEvent::ClaimProposed {
+                agent_id,
+                intent,
+                domains,
+                estimated_files,
+                confidence,
+                ..
+            } => {
                 assert_eq!(agent_id, "agent-1");
                 assert_eq!(intent, Intent::Bugfix);
                 assert_eq!(domains, vec!["AUTHENTICATION"]);
@@ -272,11 +295,23 @@ mod tests {
     #[test]
     fn decodes_other_phase2_variants() {
         let rel = json!({"type":"CLAIM_RELEASED","claimId":"claim-1","agentId":"agent-1","reason":"TASK_COMPLETED"});
-        assert!(matches!(decode_event(&rel).unwrap(), CapEvent::ClaimReleased { .. }));
+        assert!(matches!(
+            decode_event(&rel).unwrap(),
+            CapEvent::ClaimReleased { .. }
+        ));
         let st = json!({"type":"AGENT_STATE_CHANGED","agentId":"agent-1","state":"TESTING"});
-        assert!(matches!(decode_event(&st).unwrap(), CapEvent::AgentStateChanged { state: AgentState::Testing, .. }));
+        assert!(matches!(
+            decode_event(&st).unwrap(),
+            CapEvent::AgentStateChanged {
+                state: AgentState::Testing,
+                ..
+            }
+        ));
         let clr = json!({"type":"CLEAR_INVOKED","agentId":"agent-1"});
-        assert!(matches!(decode_event(&clr).unwrap(), CapEvent::ClearInvoked { .. }));
+        assert!(matches!(
+            decode_event(&clr).unwrap(),
+            CapEvent::ClearInvoked { .. }
+        ));
     }
 
     #[test]
@@ -302,23 +337,41 @@ mod tests {
 
     #[test]
     fn rejects_bad_intent_and_unknown_type_and_missing_field() {
-        let bad_intent = json!({"type":"CLAIM_PROPOSED","agentId":"a","intent":"NOPE","confidence":0.9});
-        assert_eq!(decode_event(&bad_intent).unwrap_err(), CapErrorCode::SchemaValidationFailed);
+        let bad_intent =
+            json!({"type":"CLAIM_PROPOSED","agentId":"a","intent":"NOPE","confidence":0.9});
+        assert_eq!(
+            decode_event(&bad_intent).unwrap_err(),
+            CapErrorCode::SchemaValidationFailed
+        );
         let unknown = json!({"type":"TOOL_PRECHECK","agentId":"a"});
-        assert_eq!(decode_event(&unknown).unwrap_err(), CapErrorCode::SchemaValidationFailed);
+        assert_eq!(
+            decode_event(&unknown).unwrap_err(),
+            CapErrorCode::SchemaValidationFailed
+        );
         let missing_conf = json!({"type":"CLAIM_PROPOSED","agentId":"a","intent":"BUGFIX"});
-        assert_eq!(decode_event(&missing_conf).unwrap_err(), CapErrorCode::SchemaValidationFailed);
+        assert_eq!(
+            decode_event(&missing_conf).unwrap_err(),
+            CapErrorCode::SchemaValidationFailed
+        );
     }
 
     #[test]
     fn intent_as_str_all_variants() {
         use Intent::*;
         let cases = [
-            (Security, "SECURITY"), (Qa, "QA"), (Testing, "TESTING"),
-            (Performance, "PERFORMANCE"), (Refactor, "REFACTOR"),
-            (Documentation, "DOCUMENTATION"), (Feature, "FEATURE"), (Bugfix, "BUGFIX"),
-            (Architecture, "ARCHITECTURE"), (Devops, "DEVOPS"), (Research, "RESEARCH"),
-            (Migration, "MIGRATION"), (Configuration, "CONFIGURATION"),
+            (Security, "SECURITY"),
+            (Qa, "QA"),
+            (Testing, "TESTING"),
+            (Performance, "PERFORMANCE"),
+            (Refactor, "REFACTOR"),
+            (Documentation, "DOCUMENTATION"),
+            (Feature, "FEATURE"),
+            (Bugfix, "BUGFIX"),
+            (Architecture, "ARCHITECTURE"),
+            (Devops, "DEVOPS"),
+            (Research, "RESEARCH"),
+            (Migration, "MIGRATION"),
+            (Configuration, "CONFIGURATION"),
             (Observability, "OBSERVABILITY"),
         ];
         for (v, s) in cases {
@@ -331,8 +384,12 @@ mod tests {
     fn claim_status_as_str_all_variants() {
         use ClaimStatus::*;
         let cases = [
-            (Proposed, "PROPOSED"), (Provisional, "PROVISIONAL"), (Active, "ACTIVE"),
-            (Released, "RELEASED"), (Orphaned, "ORPHANED"), (Reclaimable, "RECLAIMABLE"),
+            (Proposed, "PROPOSED"),
+            (Provisional, "PROVISIONAL"),
+            (Active, "ACTIVE"),
+            (Released, "RELEASED"),
+            (Orphaned, "ORPHANED"),
+            (Reclaimable, "RECLAIMABLE"),
             (Rejected, "REJECTED"),
         ];
         for (v, s) in cases {
@@ -347,9 +404,12 @@ mod tests {
         let cases = [
             (SchemaValidationFailed, "SCHEMA_VALIDATION_FAILED"),
             (InvalidStateTransition, "INVALID_STATE_TRANSITION"),
-            (AuthFailed, "AUTH_FAILED"), (ClaimConflict, "CLAIM_CONFLICT"),
-            (AgentNotFound, "AGENT_NOT_FOUND"), (ClaimNotFound, "CLAIM_NOT_FOUND"),
-            (CoreDegraded, "CORE_DEGRADED"), (Timeout, "TIMEOUT"),
+            (AuthFailed, "AUTH_FAILED"),
+            (ClaimConflict, "CLAIM_CONFLICT"),
+            (AgentNotFound, "AGENT_NOT_FOUND"),
+            (ClaimNotFound, "CLAIM_NOT_FOUND"),
+            (CoreDegraded, "CORE_DEGRADED"),
+            (Timeout, "TIMEOUT"),
             (UnsupportedCapVersion, "UNSUPPORTED_CAP_VERSION"),
         ];
         for (v, s) in cases {
@@ -361,9 +421,13 @@ mod tests {
     fn decodes_conflict_proposal_all_kinds() {
         use ProposalKind::*;
         let cases = [
-            ("CO_OWN", CoOwn), ("SPLIT_SCOPE", SplitScope), ("YIELD_CLAIM", YieldClaim),
-            ("TRANSFER_TASK", TransferTask), ("QUEUE_TASK", QueueTask),
-            ("ASK_USER", AskUser), ("ABORT_TASK", AbortTask),
+            ("CO_OWN", CoOwn),
+            ("SPLIT_SCOPE", SplitScope),
+            ("YIELD_CLAIM", YieldClaim),
+            ("TRANSFER_TASK", TransferTask),
+            ("QUEUE_TASK", QueueTask),
+            ("ASK_USER", AskUser),
+            ("ABORT_TASK", AbortTask),
         ];
         for (s, k) in cases {
             let ev = json!({
@@ -378,13 +442,20 @@ mod tests {
                 }
             });
             match decode_event(&ev).unwrap() {
-                CapEvent::ConflictProposalSubmitted { conflict_id, from, proposal } => {
+                CapEvent::ConflictProposalSubmitted {
+                    conflict_id,
+                    from,
+                    proposal,
+                } => {
                     assert_eq!(conflict_id, "conflict-1");
                     assert_eq!(from, "agent-1");
                     assert_eq!(proposal.kind, k);
                     assert_eq!(proposal.summary, "do the thing");
                     assert_eq!(proposal.claim_changes[0].agent_id, "agent-1");
-                    assert_eq!(proposal.claim_changes[0].keep.as_ref().unwrap(), &vec!["src/a.rs".to_string()]);
+                    assert_eq!(
+                        proposal.claim_changes[0].keep.as_ref().unwrap(),
+                        &vec!["src/a.rs".to_string()]
+                    );
                     assert!(!proposal.requires_user_approval);
                 }
                 other => panic!("wrong variant: {other:?}"),
@@ -412,7 +483,10 @@ mod tests {
     fn decodes_conflict_user_decision() {
         let ev = json!({"type":"CONFLICT_USER_DECISION","conflictId":"c1","choice":"option-2"});
         match decode_event(&ev).unwrap() {
-            CapEvent::ConflictUserDecision { conflict_id, choice } => {
+            CapEvent::ConflictUserDecision {
+                conflict_id,
+                choice,
+            } => {
                 assert_eq!(conflict_id, "c1");
                 assert_eq!(choice, "option-2");
             }
@@ -423,14 +497,23 @@ mod tests {
     #[test]
     fn rejects_bad_proposal_kind() {
         let ev = json!({"type":"CONFLICT_PROPOSAL_SUBMITTED","conflictId":"c1","from":"a1","proposal":{"kind":"NOPE"}});
-        assert_eq!(decode_event(&ev).unwrap_err(), CapErrorCode::SchemaValidationFailed);
+        assert_eq!(
+            decode_event(&ev).unwrap_err(),
+            CapErrorCode::SchemaValidationFailed
+        );
     }
 
     #[test]
     fn proposal_kind_as_str_and_conflict_not_found() {
         assert_eq!(ProposalKind::SplitScope.as_str(), "SPLIT_SCOPE");
         assert_eq!(ProposalKind::QueueTask.as_str(), "QUEUE_TASK");
-        assert_eq!(serde_json::to_value(ProposalKind::CoOwn).unwrap(), json!("CO_OWN"));
-        assert_eq!(CapErrorCode::ConflictNotFound.as_str(), "CONFLICT_NOT_FOUND");
+        assert_eq!(
+            serde_json::to_value(ProposalKind::CoOwn).unwrap(),
+            json!("CO_OWN")
+        );
+        assert_eq!(
+            CapErrorCode::ConflictNotFound.as_str(),
+            "CONFLICT_NOT_FOUND"
+        );
     }
 }
