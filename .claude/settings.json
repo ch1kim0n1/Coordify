@@ -4,7 +4,10 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "node phase-0/hooks/session-start.js" }
+          {
+            "type": "command",
+            "command": "\"/Users/pomoika/.nvm/versions/node/v25.2.0/bin/node\" \"/Users/pomoika/Documents/GitHub_repo/Coordify/packages/coordify-hook/hooks/session-start.js\""
+          }
         ]
       }
     ],
@@ -12,7 +15,10 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "node phase-0/hooks/user-prompt-submit.js" }
+          {
+            "type": "command",
+            "command": "\"/Users/pomoika/.nvm/versions/node/v25.2.0/bin/node\" \"/Users/pomoika/Documents/GitHub_repo/Coordify/packages/coordify-hook/hooks/user-prompt-submit.js\""
+          }
         ]
       }
     ],
@@ -20,7 +26,10 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "node phase-0/hooks/pre-tool-use.js" }
+          {
+            "type": "command",
+            "command": "\"/Users/pomoika/.nvm/versions/node/v25.2.0/bin/node\" \"/Users/pomoika/Documents/GitHub_repo/Coordify/packages/coordify-hook/hooks/pre-tool-use.js\""
+          }
         ]
       }
     ],
@@ -28,7 +37,10 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "node phase-0/hooks/post-tool-use.js" }
+          {
+            "type": "command",
+            "command": "\"/Users/pomoika/.nvm/versions/node/v25.2.0/bin/node\" \"/Users/pomoika/Documents/GitHub_repo/Coordify/packages/coordify-hook/hooks/post-tool-use.js\""
+          }
         ]
       }
     ],
@@ -36,7 +48,10 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "node phase-0/hooks/subagent-start.js" }
+          {
+            "type": "command",
+            "command": "\"/Users/pomoika/.nvm/versions/node/v25.2.0/bin/node\" \"/Users/pomoika/Documents/GitHub_repo/Coordify/packages/coordify-hook/hooks/subagent-start.js\""
+          }
         ]
       }
     ],
@@ -44,7 +59,10 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "node phase-0/hooks/subagent-stop.js" }
+          {
+            "type": "command",
+            "command": "\"/Users/pomoika/.nvm/versions/node/v25.2.0/bin/node\" \"/Users/pomoika/Documents/GitHub_repo/Coordify/packages/coordify-hook/hooks/subagent-stop.js\""
+          }
         ]
       }
     ],
@@ -52,7 +70,10 @@
       {
         "matcher": "",
         "hooks": [
-          { "type": "command", "command": "node phase-0/hooks/session-end.js" }
+          {
+            "type": "command",
+            "command": "\"/Users/pomoika/.nvm/versions/node/v25.2.0/bin/node\" \"/Users/pomoika/Documents/GitHub_repo/Coordify/packages/coordify-hook/hooks/session-end.js\""
+          }
         ]
       }
     ]

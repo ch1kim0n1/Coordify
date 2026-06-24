@@ -5,7 +5,16 @@ const path = require('path');
 
 const SETTINGS_PATH = path.resolve(process.cwd(), '.claude', 'settings.json');
 const BACKUP_PATH = SETTINGS_PATH + '.backup';
-const HOOKS_DIR = 'packages/coordify-hook/hooks';
+// Absolute path so hooks work regardless of CWD at invocation time
+const HOOKS_DIR = path.resolve(__dirname, 'hooks');
+const NODE_BIN = process.execPath;
+
+function hookEntry(file) {
+  return {
+    matcher: '',
+    hooks: [{ type: 'command', command: JSON.stringify(NODE_BIN) + ' ' + JSON.stringify(path.join(HOOKS_DIR, file)) }],
+  };
+}
 
 function run() {
   if (fs.existsSync(SETTINGS_PATH)) {
@@ -20,13 +29,13 @@ function run() {
   }
 
   settings.hooks = {
-    SessionStart:     [{ command: 'node ' + HOOKS_DIR + '/session-start.js' }],
-    UserPromptSubmit: [{ command: 'node ' + HOOKS_DIR + '/user-prompt-submit.js' }],
-    PreToolUse:       [{ command: 'node ' + HOOKS_DIR + '/pre-tool-use.js' }],
-    PostToolUse:      [{ command: 'node ' + HOOKS_DIR + '/post-tool-use.js' }],
-    SubagentStart:    [{ command: 'node ' + HOOKS_DIR + '/subagent-start.js' }],
-    SubagentStop:     [{ command: 'node ' + HOOKS_DIR + '/subagent-stop.js' }],
-    SessionEnd:       [{ command: 'node ' + HOOKS_DIR + '/session-end.js' }],
+    SessionStart:     [hookEntry('session-start.js')],
+    UserPromptSubmit: [hookEntry('user-prompt-submit.js')],
+    PreToolUse:       [hookEntry('pre-tool-use.js')],
+    PostToolUse:      [hookEntry('post-tool-use.js')],
+    SubagentStart:    [hookEntry('subagent-start.js')],
+    SubagentStop:     [hookEntry('subagent-stop.js')],
+    SessionEnd:       [hookEntry('session-end.js')],
   };
 
   fs.mkdirSync(path.dirname(SETTINGS_PATH), { recursive: true });
