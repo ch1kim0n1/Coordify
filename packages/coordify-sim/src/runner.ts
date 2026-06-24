@@ -36,7 +36,13 @@ class SimClient {
     return new Promise((resolve, reject) => {
       if (!this.sock) { reject(new Error('not connected')); return; }
       const id = 's' + (++this.seq);
-      this.pending.set(id, resolve);
+      this.pending.set(id, (resp) => {
+        if (!resp.ok) {
+          reject(new Error(`Core rejected ${action}: ${JSON.stringify(resp)}`));
+        } else {
+          resolve(resp);
+        }
+      });
       this.sock.write(JSON.stringify({ id, token: this.masterToken, action, ...payload }) + '\n', err => {
         if (err) { this.pending.delete(id); reject(err); }
       });
@@ -83,16 +89,18 @@ export async function runScenario(
     const step = script.steps[i];
     if (step.delay_ms > 0) await new Promise(r => setTimeout(r, step.delay_ms));
     process.stdout.write(`  Step ${i + 1}/${script.steps.length}  ${(step.event as any).type ?? '?'}\n`);
-    await client.submitEvent(step.event as Record<string, unknown>);
+    try {
+      await client.submitEvent(step.event as Record<string, unknown>);
+    } catch (e) {
+      client.close();
+      throw new Error(`Step ${i + 1} failed: ${String(e)}`);
+    }
   }
 
   if (script.finalize && !opts.noFinalize) {
     process.stdout.write(`  Finalizing...\n`);
-    for (const agentId of script.agents) {
-      await client.submitEvent({ type: 'AGENT_LEFT', agentId }).catch(() => {});
-    }
+    // Core detects departure via socket close — no AGENT_LEFT event needed
   }
-
   client.close();
   process.stdout.write(`Done. Use 'coordify watch' or 'coordify stats' to inspect results.\n`);
 }
