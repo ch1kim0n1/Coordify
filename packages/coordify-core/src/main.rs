@@ -3,6 +3,33 @@ use coordify_core::{bootstrap, server, session};
 use std::os::unix::net::UnixListener;
 
 fn main() {
+    // Handle --version / -V / --help / -h before any lock acquisition so
+    // `coordify-core --version` works even if another Core is running.
+    let raw_args: Vec<String> = std::env::args().skip(1).collect();
+    if raw_args.iter().any(|a| a == "--version" || a == "-V") {
+        println!("coordify-core {VERSION}");
+        return;
+    }
+    if raw_args.iter().any(|a| a == "--help" || a == "-h") {
+        eprintln!(
+            "coordify-core {VERSION}\n\
+             \n\
+             Usage: coordify-core [--root <path>]\n\
+             \n\
+             Options:\n  \
+               --root <path>   Project root (default: current directory)\n  \
+               --version, -V   Print version and exit\n  \
+               --help, -h      Print this help and exit\n\
+             \n\
+             Coordify Core is the local runtime that owns canonical live state\n\
+             for multi-agent coordination. It binds a Unix domain socket under\n\
+             <root>/.coordify/runtime/ and validates CAP events from hooks/CLI.\n\
+             \n\
+             Platform: macOS, Linux. Windows is not supported in 0.1.0."
+        );
+        return;
+    }
+
     let root = parse_root();
     let paths = Paths::new(&root);
 

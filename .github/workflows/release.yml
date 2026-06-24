@@ -1,0 +1,87 @@
+name: Release
+
+# Publishes coordify-core to crates.io and the three npm packages to npmjs.com,
+# then cuts a GitHub Release with release notes from CHANGELOG.md.
+#
+# Trigger: push a tag matching v*.*.* (e.g. v0.1.0). Manual dispatch also
+# available via the Actions UI for re-runs.
+#
+# Required GitHub Secrets (see RELEASE.md):
+#   CARGO_REGISTRY_TOKEN  — crates.io publish-only token, scoped to coordify-core
+#   NPM_TOKEN             — npm automation token, scoped to the three packages
+#
+# Provenance/SIGSTORE is enabled for npm packages where supported (public repo
+# + npm provenance). For a private repo, provenance is skipped automatically.
+on:
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+jobs:
+  publish-core:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/coordify-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: cargo publish (dry-run first)
+        run: |
+          cargo publish --dry-run
+          cargo publish --token "${{ secrets.CARGO_REGISTRY_TOKEN }}"
+
+  publish-npm:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        pkg: [coordify-hook, coordify-cli, coordify-sim]
+    defaults:
+      run:
+        working-directory: packages/${{ matrix.pkg }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+      - run: npm ci
+      - name: Build (cli + sim only)
+        if: matrix.pkg != 'coordify-hook'
+        run: npm run build
+      - name: npm publish
+        run: npm publish --access public --provenance
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  github-release:
+    needs: [publish-core, publish-npm]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Extract release notes from CHANGELOG.md
+        id: notes
+        run: |
+          # Grab the section between the first and second "## [" headings.
+          awk '/^## \[/{n++} n==1{print} n==2{exit}' CHANGELOG.md > /tmp/notes.md
+          echo "## What's new" > /tmp/body.md
+          cat /tmp/notes.md >> /tmp/body.md
+          echo "" >> /tmp/body.md
+          echo "## Install" >> /tmp/body.md
+          echo "" >> /tmp/body.md
+          echo '```bash' >> /tmp/body.md
+          echo 'cargo install coordify-core' >> /tmp/body.md
+          echo 'npm install -g coordify-hook coordify-cli coordify-sim' >> /tmp/body.md
+          echo '```' >> /tmp/body.md
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: /tmp/body.md
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}

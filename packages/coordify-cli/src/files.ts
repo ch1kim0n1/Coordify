@@ -8,7 +8,7 @@ function readJson<T>(filePath: string): T | null {
 
 export function listSessions(root: string): string[] {
   const dir = sessions(root);
-  let entries: string[];
+  let entries: fs.Dirent[];
   try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
   catch { return []; }
   // Only directories (a stray file under sessions/ should not appear as a

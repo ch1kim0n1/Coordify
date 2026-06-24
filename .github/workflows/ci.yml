@@ -9,13 +9,14 @@ on:
 # and enforces a line-coverage floor so coverage cannot silently rot as the
 # codebase grows (Phases 2-6). Raise --fail-under-lines as coverage improves;
 # current floor is well below the measured ~96%.
+#
+# Matrix is ubuntu-only on purpose: macOS Actions minutes are paid even for
+# public repos, and Coordify 0.1.0 is Unix-only (macOS + Linux) with no
+# Windows support. macOS verification is done manually on a dev machine before
+# each release (see RELEASE.md).
 jobs:
   coordify-core:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: packages/coordify-core
@@ -37,7 +38,7 @@ jobs:
             ~/.cargo/registry
             ~/.cargo/git
             packages/coordify-core/target
-          key: ${{ runner.os }}-cargo-${{ hashFiles('packages/coordify-core/Cargo.lock') }}
+          key: ubuntu-cargo-${{ hashFiles('packages/coordify-core/Cargo.lock') }}
 
       - name: Format check
         run: cargo fmt --check
@@ -49,7 +50,6 @@ jobs:
         run: cargo llvm-cov --fail-under-lines 90 -- --test-threads=4
 
   # Separate audit job so a new advisory does not get masked by a build failure.
-  # Runs only on ubuntu to avoid wasting macOS minutes on a pure-metadata check.
   cargo-audit:
     runs-on: ubuntu-latest
     defaults:
@@ -91,11 +91,7 @@ jobs:
           npm audit --omit=dev --audit-level=high
 
   coordify-hook:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: packages/coordify-hook
@@ -111,11 +107,7 @@ jobs:
         run: node --test test/mapping.test.js test/install.test.js test/core-client.test.js
 
   coordify-cli:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: packages/coordify-cli
@@ -131,11 +123,7 @@ jobs:
       - run: npm test
 
   coordify-sim:
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu-latest, macos-latest]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: packages/coordify-sim

@@ -45,6 +45,10 @@ async function main() {
     process.stdout.write(HELP);
     process.exit(0);
   }
+  if (argv.includes('--version') || argv.includes('-V')) {
+    process.stdout.write('coordify-sim 0.1.0\n');
+    process.exit(0);
+  }
 
   switch (cmd) {
     case 'simulate': {

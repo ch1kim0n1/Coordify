@@ -45,6 +45,10 @@ const cmd = argv.find(a => !a.startsWith('-'));
 const rest = argv.filter(a => !a.startsWith('-') && a !== cmd);
 
 async function main() {
+  if (argv.includes('--version') || argv.includes('-V')) {
+    process.stdout.write('coordify 0.1.0\n');
+    return;
+  }
   switch (cmd) {
     case 'status': await runStatus(root, { json }); break;
     case 'agents': await runAgents(root, { json }); break;
@@ -79,6 +83,7 @@ async function main() {
       break;
     }
     case '--help':
+    case '-h':
     case undefined: process.stdout.write(HELP); break;
     default: process.stdout.write(`unknown command: ${cmd}\n\n${HELP}`);
   }
