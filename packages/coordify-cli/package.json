@@ -8,7 +8,7 @@
     "coordify": "dist/cli.js"
   },
   "scripts": {
-    "build": "tsc && tsc -p tsconfig.tui.json && node -e \"require('fs').cpSync('src/tui/package.json','dist/tui/package.json')\"",
+    "build": "tsc -p tsconfig.tui.json && tsc && node -e \"require('fs').cpSync('src/tui/package.json','dist/tui/package.json')\"",
     "test": "npx tsx --test 'test/**/*.test.ts' 'test/**/*.test.tsx'"
   },
   "dependencies": {
