@@ -367,6 +367,13 @@ If Coordify Core crashes, agents do not silently pretend coordination is still a
 
 **MVP** is Claude Code CLI, local machine, single project root, CLI/TUI only. No web dashboard. No cloud. No cross-machine networking.
 
+Coordify is **free, MIT-licensed software**. There is no billing, no payment, no
+SaaS tier, no paid features, no license server, no usage metering, no quota
+enforcement. The local-first MIT core will stay free forever. Install anonymously
+via `cargo install coordify-core` and `npm install -g coordify-hook coordify-cli
+coordify-sim` — no account required. Coordify makes zero outbound network calls,
+so it runs fine on an air-gapped machine after install.
+
 **Next:** Codex CLI adapter. Contributions welcome — see below.
 
 ---
