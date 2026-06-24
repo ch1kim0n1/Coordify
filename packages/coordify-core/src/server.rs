@@ -30,7 +30,15 @@ pub struct Shared {
 }
 
 pub fn handle_request(shared: &Shared, req: &Request) -> Response {
-    if req.token != shared.token {
+    // Constant-time token compare avoids a timing side-channel on the session
+    // token. A failed attempt is logged (without the token) for observability;
+    // per-connection rate limiting is handled in handle_conn.
+    if !crate::bootstrap::constant_time_eq(&req.token, &shared.token) {
+        let _ = shared.log.lock().unwrap().append(&serde_json::json!({
+            "type": "BAD_TOKEN",
+            "action": req.action,
+            "ts": crate::bootstrap::now_iso(),
+        }));
         return Response::err(&req.id, "unauthorized");
     }
     match req.action.as_str() {
@@ -1157,6 +1165,48 @@ mod tests {
         assert!(!resp.ok);
         assert_eq!(resp.error.as_deref(), Some("unauthorized"));
         assert_eq!(s.state.lock().unwrap().agent_count(), 0);
+    }
+
+    #[test]
+    fn bad_token_is_logged_without_the_token() {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "coordify-srv-badtoken-{}-{}",
+            std::process::id(),
+            TEST_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        ));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let log = EventLog::create(dir.join("events.log")).unwrap();
+        let s = Arc::new(Shared {
+            state: Mutex::new(State::new()),
+            log: Mutex::new(log),
+            token: "good-token".to_string(),
+            agents_seen: Mutex::new(0),
+            finalized: AtomicBool::new(false),
+            heat: Mutex::new(HeatStore::new()),
+            heat_cfg: HeatConfig::default(),
+            knowledge: Mutex::new(KnowledgeStore::new()),
+            knowledge_k: 5.0,
+            conflicts: Mutex::new(ConflictStore::new()),
+            conflict_cfg: ConflictConfig::default(),
+            waitgraph: Mutex::new(WaitGraph::new()),
+        });
+        let _ = handle_request(&s, &req("wrong-token", "register"));
+        let contents = std::fs::read_to_string(dir.join("events.log")).unwrap();
+        assert!(
+            contents.contains("\"type\":\"BAD_TOKEN\""),
+            "BAD_TOKEN event logged"
+        );
+        assert!(
+            !contents.contains("good-token"),
+            "token value must not be logged"
+        );
+        assert!(
+            !contents.contains("wrong-token"),
+            "guessed value must not be logged"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

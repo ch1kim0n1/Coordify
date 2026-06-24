@@ -82,9 +82,29 @@ fn acquire_lock_inner(paths: &Paths, version: &str, retry: bool) -> std::io::Res
 
 pub fn generate_token() -> std::io::Result<String> {
     let mut f = fs::File::open("/dev/urandom")?;
-    let mut buf = [0u8; 16];
+    // 32 bytes of CSPRNG output (256 bits) — hex-encoded to survive in a text
+    // file without mangling. Regenerated on every Core start, never reused.
+    let mut buf = [0u8; 32];
     f.read_exact(&mut buf)?;
     Ok(buf.iter().map(|b| format!("{:02x}", b)).collect())
+}
+
+/// Constant-time string comparison for token equality.
+///
+/// `String::!=` short-circuits on the first differing byte, leaking a timing
+/// side-channel about how much of a guessed token matched. This XOR-accumulates
+/// every byte so the runtime is independent of where (or whether) the strings
+/// differ. The length check is constant for fixed-length session tokens.
+pub fn constant_time_eq(a: &str, b: &str) -> bool {
+    let (ab, bb) = (a.as_bytes(), b.as_bytes());
+    if ab.len() != bb.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for i in 0..ab.len() {
+        diff |= ab[i] ^ bb[i];
+    }
+    diff == 0
 }
 
 pub fn write_token(paths: &Paths, token: &str) -> std::io::Result<()> {
@@ -188,16 +208,26 @@ mod tests {
     }
 
     #[test]
-    fn token_is_32_hex_chars_and_file_is_0600() {
+    fn token_is_64_hex_chars_and_file_is_0600() {
         let root = temp_root("token");
         let paths = Paths::new(&root);
         ensure_runtime_dir(&paths).unwrap();
         let token = generate_token().unwrap();
-        assert_eq!(token.len(), 32);
+        // 32 bytes hex-encoded = 64 chars; 256 bits of entropy.
+        assert_eq!(token.len(), 64);
         assert!(token.chars().all(|c| c.is_ascii_hexdigit()));
         write_token(&paths, &token).unwrap();
         let mode = fs::metadata(paths.token()).unwrap().permissions().mode() & 0o777;
         assert_eq!(mode, 0o600);
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn constant_time_eq_matches_and_mismatches() {
+        assert!(constant_time_eq("abcdef", "abcdef"));
+        assert!(!constant_time_eq("abcdef", "abcdez"));
+        assert!(!constant_time_eq("abcdef", "abcdefg"));
+        assert!(!constant_time_eq("", "a"));
+        assert!(constant_time_eq("", ""));
     }
 }

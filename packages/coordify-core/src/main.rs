@@ -20,9 +20,12 @@ fn main() {
 
     if let Err(e) = run(&paths) {
         eprintln!("coordify-core: {e}");
-        // Best-effort cleanup so a crash does not strand the lock.
+        // Best-effort cleanup so a crash does not strand the lock or leave a
+        // stale token/socket that could be reused or confuse the next start.
         let _ = std::fs::remove_file(paths.lock());
         let _ = std::fs::remove_file(paths.socket());
+        let _ = std::fs::remove_file(paths.token());
+        let _ = std::fs::remove_file(paths.pid());
         std::process::exit(1);
     }
 }
