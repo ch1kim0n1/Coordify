@@ -14,7 +14,7 @@ Commands:
 
 Simulate options:
   --dry-run        Validate and print steps; do not connect to Core
-  --no-finalize    Skip AGENT_LEFT events at end
+  --no-finalize    Skip agent departure finalization at end
   --core-bin <p>   Path to coordify-core binary
   --root <dir>     Project root (default: cwd)
 
