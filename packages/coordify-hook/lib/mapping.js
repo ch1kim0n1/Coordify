@@ -62,10 +62,15 @@ function mapEvent(hook, payload) {
 
     case 'PreToolUse': {
       const tool = payload.tool_name || '';
+      const ti = payload.tool_input || {};
       const type = tool === 'Edit' || tool === 'Write' || tool === 'MultiEdit'
         ? 'RISKY_WRITE_CHECKED'
         : 'TOOL_PRECHECK';
-      return { kind: 'record', record: { type, tool, input: payload.tool_input || {} } };
+      // Log only the file path, never the edit content (old_string/new_string
+      // may contain proprietary source). This is a local trace artifact but
+      // the principle holds: no file contents in any Coordify log.
+      const file = ti.file_path || ti.path || null;
+      return { kind: 'record', record: { type, tool, file } };
     }
 
     case 'PostToolUse': {

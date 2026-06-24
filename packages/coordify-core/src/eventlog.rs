@@ -3,8 +3,16 @@ use std::io::Write;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 
+/// Soft cap on a single event log file. When the file exceeds this size the
+/// next append rotates the live file to `.1` and starts fresh, so a runaway
+/// session cannot fill the disk. 64 MiB is generous for a normal session and
+/// bounds the worst case for a pathological one.
+pub const MAX_LOG_BYTES: u64 = 64 * 1024 * 1024;
+
 pub struct EventLog {
     file: File,
+    path: PathBuf,
+    written: u64,
 }
 
 impl EventLog {
@@ -14,20 +22,39 @@ impl EventLog {
             // 0o700: only the owning user can read/enter the session dir.
             let _ = fs::set_permissions(parent, Permissions::from_mode(0o700));
         }
+        let written = fs::metadata(&path).map(|m| m.len()).unwrap_or(0);
         // 0o600: session logs may contain agent ids, file paths, intents —
         // restrict to the owning user so other local users cannot read them.
         let file = OpenOptions::new()
             .create(true)
             .append(true)
             .mode(0o600)
-            .open(path)?;
-        Ok(Self { file })
+            .open(&path)?;
+        Ok(Self {
+            file,
+            path,
+            written,
+        })
     }
 
     pub fn append(&mut self, event: &serde_json::Value) -> std::io::Result<()> {
+        // Size cap: rotate to .1 before writing once we cross the threshold.
+        if self.written >= MAX_LOG_BYTES {
+            let rotated = self.path.with_extension("log.1");
+            let _ = fs::remove_file(&rotated);
+            self.file.sync_data()?;
+            fs::rename(&self.path, &rotated)?;
+            self.file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .mode(0o600)
+                .open(&self.path)?;
+            self.written = 0;
+        }
         let line = serde_json::to_string(event)?;
         self.file.write_all(line.as_bytes())?;
         self.file.write_all(b"\n")?;
+        self.written += line.len() as u64 + 1;
         self.file.sync_data()
     }
 }
@@ -94,5 +121,27 @@ mod tests {
         let result = EventLog::create(log_path);
         assert!(result.is_err(), "expected Err when parent path is a file");
         let _ = fs::remove_file(&base);
+    }
+
+    #[test]
+    fn rotates_when_size_cap_exceeded() {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!("coordify-elog-rot-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let path = dir.join("events.log");
+        // Pre-seed the file to just under the cap by writing a large blob.
+        fs::create_dir_all(&dir).unwrap();
+        let seed = "x".repeat(MAX_LOG_BYTES as usize);
+        fs::write(&path, &seed).unwrap();
+        let mut log = EventLog::create(path.clone()).unwrap();
+        log.append(&json!({"type": "AFTER_CAP"})).unwrap();
+        // The original oversized file should have rotated to .log.1 and the
+        // live file should contain only the new event.
+        let rotated = path.with_extension("log.1");
+        assert!(rotated.exists(), "rotated file exists");
+        let live = fs::read_to_string(&path).unwrap();
+        assert!(live.contains("AFTER_CAP"));
+        assert!(!live.starts_with('x'), "live file is the fresh one");
+        let _ = fs::remove_dir_all(&dir);
     }
 }
