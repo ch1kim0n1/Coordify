@@ -41,17 +41,22 @@ function opt(name: string): string | undefined {
 }
 
 async function main() {
+  if (argv.includes('--help') || argv.includes('-h')) {
+    process.stdout.write(HELP);
+    process.exit(0);
+  }
+
   switch (cmd) {
     case 'simulate': {
       const scriptPath = argv.find(a => !a.startsWith('-') && a !== 'simulate');
       if (!scriptPath) { process.stdout.write('usage: coordify-sim simulate <script.json>\n'); process.exit(1); }
       let raw: unknown;
       try { raw = JSON.parse(fs.readFileSync(scriptPath, 'utf8')); }
-      catch { process.stdout.write(`error: cannot read ${scriptPath}\n`); process.exit(1); return; }
+      catch { process.stdout.write(`error: cannot read ${scriptPath}\n`); process.exit(1); }
       const result = validateScript(raw);
       if (Array.isArray(result)) {
         process.stdout.write('invalid script:\n' + result.map(e => `  ${e}`).join('\n') + '\n');
-        process.exit(1); return;
+        process.exit(1);
       }
       const dryRun = flag('--dry-run');
       if (dryRun) {
@@ -81,7 +86,6 @@ async function main() {
       }
       break;
     }
-    case '--help':
     case undefined: process.stdout.write(HELP); break;
     default: process.stdout.write(`unknown command: ${cmd}\n\n${HELP}`);
   }
