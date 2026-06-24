@@ -29,6 +29,10 @@ Coordify is the coordination layer between them. It is not an orchestrator, not 
 
 ## Install
 
+> **Platform support:** macOS and Linux. Windows is not supported in 0.1.0
+> (tracked as a future milestone — see Architecture). Requires Node ≥ 18 and
+> Rust stable.
+
 Coordify has two required components: **Coordify Core** (a Rust binary — the local runtime that owns state and calculates heat) and **Coordify Hooks** (a TypeScript adapter that wires Claude Code lifecycle events to Core). The CLI is optional but useful.
 
 **1. Coordify Core** (Rust daemon — required):
@@ -300,7 +304,11 @@ Coordify has four components.
 
 Core is a single static binary. It owns canonical live state. It validates every CAP event before mutating state. It never calls an LLM to decide heat. Agents propose. Core commits.
 
-Communication between hooks and Core runs over a Unix domain socket (macOS/Linux) or named pipe (Windows) with a session-scoped auth token.
+Communication between hooks and Core runs over a Unix domain socket with a
+session-scoped auth token. **Coordify 0.1.0 supports macOS and Linux.** Windows
+is not yet supported — the Core uses `UnixListener`, `/dev/urandom`, and `kill
+-0`, all Unix-only. Windows support (named pipes, `BCryptGenRandom`, Windows
+process-alive check, ACL-based file perms) is tracked as a future milestone.
 
 ### Project Layout
 
