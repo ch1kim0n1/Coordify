@@ -1542,7 +1542,7 @@ mod tests {
         let agents = data["agents"].as_array().unwrap();
         assert_eq!(agents.len(), 1);
         assert_eq!(agents[0]["agentId"], agent_id);
-        assert!(data["claims"].as_array().unwrap().len() >= 1 || data["agents"][0]["claimId"].is_string());
+        assert!(!data["claims"].as_array().unwrap().is_empty() || data["agents"][0]["claimId"].is_string());
         let heat = data["heat"].as_array().unwrap();
         assert!(heat.is_empty()); // no heat yet with one agent
     }
