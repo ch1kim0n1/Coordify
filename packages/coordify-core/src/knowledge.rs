@@ -190,7 +190,21 @@ pub(crate) fn write_atomic(path: &Path, contents: &str) -> std::io::Result<()> {
         let _ = std::fs::rename(path, with_suffix(path, ".prev"));
     }
     let tmp = with_suffix(path, ".tmp");
-    std::fs::write(&tmp, contents)?;
+    // Write via OpenOptions with 0o600 so knowledge files (hotzones, coupling,
+    // velocity profiles) are owner-only, then atomically rename into place.
+    {
+        use std::fs::OpenOptions;
+        use std::io::Write;
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut f = OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .mode(0o600)
+            .open(&tmp)?;
+        f.write_all(contents.as_bytes())?;
+        f.sync_all()?;
+    }
     std::fs::rename(&tmp, path)?;
     Ok(())
 }

@@ -6,8 +6,8 @@
 
 [![MIT license](https://img.shields.io/badge/license-MIT-111111?style=flat-square)](LICENSE)
 [![Claude Code](https://img.shields.io/badge/claude-code-111111?style=flat-square)](https://claude.ai/code)
-[![CAP Protocol](https://img.shields.io/badge/protocol-CAP-111111?style=flat-square)]()
-[![local-first](https://img.shields.io/badge/local--first-%E2%9C%93-111111?style=flat-square)]()
+[![CAP Protocol](https://img.shields.io/badge/protocol-CAP-111111?style=flat-square)](#architecture)
+[![local-first](https://img.shields.io/badge/local--first-%E2%9C%93-111111?style=flat-square)](#scope)
 [![version](https://img.shields.io/github/v/release/ch1kim0n1/coordify?style=flat-square&color=111111&label=release)](https://github.com/ch1kim0n1/coordify/releases)
 [![stars](https://img.shields.io/github/stars/ch1kim0n1/coordify?style=flat-square&color=111111&label=stars)](https://github.com/ch1kim0n1/coordify/stargazers)
 

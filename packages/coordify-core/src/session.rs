@@ -1,5 +1,6 @@
 use crate::paths::Paths;
-use std::fs;
+use std::fs::{self, Permissions};
+use std::os::unix::fs::PermissionsExt;
 use std::path::PathBuf;
 
 #[derive(Clone)]
@@ -15,6 +16,9 @@ pub fn new_session_id() -> String {
 pub fn create_session(paths: &Paths, id: String) -> std::io::Result<Session> {
     let dir = paths.session_dir(&id);
     fs::create_dir_all(&dir)?;
+    // 0o700: session artifacts (events.log, stats, summary) are private to the
+    // owning user; another local user must not be able to read them.
+    let _ = fs::set_permissions(&dir, Permissions::from_mode(0o700));
     Ok(Session { id, dir })
 }
 

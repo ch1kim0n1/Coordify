@@ -1,5 +1,6 @@
-use std::fs::{self, File, OpenOptions};
+use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::Write;
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::PathBuf;
 
 pub struct EventLog {
@@ -10,8 +11,16 @@ impl EventLog {
     pub fn create(path: PathBuf) -> std::io::Result<Self> {
         if let Some(parent) = path.parent() {
             fs::create_dir_all(parent)?;
+            // 0o700: only the owning user can read/enter the session dir.
+            let _ = fs::set_permissions(parent, Permissions::from_mode(0o700));
         }
-        let file = OpenOptions::new().create(true).append(true).open(path)?;
+        // 0o600: session logs may contain agent ids, file paths, intents —
+        // restrict to the owning user so other local users cannot read them.
+        let file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .mode(0o600)
+            .open(path)?;
         Ok(Self { file })
     }
 

@@ -4,6 +4,46 @@ use std::collections::{BTreeSet, HashMap};
 pub const ACTIVE_MIN: f64 = 0.75;
 pub const PROVISIONAL_MIN: f64 = 0.45;
 
+/// Maximum number of files/paths accepted in a single claim or touch event.
+pub const MAX_FILES: usize = 1024;
+/// Maximum length of a single path or string field accepted from a client.
+pub const MAX_FIELD_LEN: usize = 4096;
+
+/// Normalize and validate a client-supplied project-relative path.
+///
+/// Claims and file-touch events only ever reference paths *inside* the project
+/// root. Reject absolute paths and any path containing a `..` component so a
+/// malicious or buggy agent cannot reference files outside the project (e.g.
+/// `../../sibling-repo/secret` or `/etc/passwd`). Backslashes are normalized to
+/// forward slashes so the rule holds on Windows-style input too.
+///
+/// Returns the normalized path, or `None` if the path is rejected.
+pub fn sanitize_path(raw: &str) -> Option<String> {
+    if raw.is_empty() || raw.len() > MAX_FIELD_LEN {
+        return None;
+    }
+    let normalized = raw.replace('\\', "/");
+    if normalized.starts_with('/') {
+        return None;
+    }
+    // Reject any component that escapes the project root.
+    for comp in normalized.split('/') {
+        if comp == ".." {
+            return None;
+        }
+    }
+    Some(normalized)
+}
+
+/// Filter a list of client-supplied paths down to the safe, normalized subset.
+pub fn sanitize_files(files: &[String]) -> Vec<String> {
+    files
+        .iter()
+        .filter_map(|f| sanitize_path(f))
+        .take(MAX_FILES)
+        .collect()
+}
+
 #[derive(Debug, Clone)]
 pub struct Claim {
     pub claim_id: String,
@@ -57,6 +97,15 @@ impl ClaimStore {
         let status = status_for_confidence(confidence)?;
         let claim_id = format!("claim-{}", self.next_id);
         self.next_id += 1;
+        // Sanitize client-supplied paths: drop absolute paths and `..`
+        // traversal so a claim cannot reference files outside the project root.
+        let estimated_files = sanitize_files(&estimated_files);
+        let task_summary = if task_summary.len() > MAX_FIELD_LEN {
+            task_summary[..MAX_FIELD_LEN].to_string()
+        } else {
+            task_summary
+        };
+        let domains = domains.into_iter().take(MAX_FILES).collect();
         let claim = Claim {
             claim_id: claim_id.clone(),
             agent_id: agent_id.to_string(),
@@ -94,7 +143,7 @@ impl ClaimStore {
             .map(|c| c.claim_id.clone())?;
         let claim = self.claims.get_mut(&id).unwrap();
         let mut newly = Vec::new();
-        for f in files {
+        for f in sanitize_files(files) {
             if claim.actual_files.insert(f.clone()) {
                 newly.push(f.clone());
             }
@@ -198,6 +247,55 @@ impl ClaimStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sanitize_path_rejects_traversal_and_absolute_paths() {
+        assert_eq!(
+            sanitize_path("src/auth.rs"),
+            Some("src/auth.rs".to_string())
+        );
+        assert_eq!(
+            sanitize_path("src\\auth.rs"),
+            Some("src/auth.rs".to_string())
+        );
+        assert_eq!(sanitize_path("../sibling/secret"), None);
+        assert_eq!(sanitize_path("src/../../etc/passwd"), None);
+        assert_eq!(sanitize_path("/etc/passwd"), None);
+        assert_eq!(sanitize_path(""), None);
+        let long = "a".repeat(MAX_FIELD_LEN + 1);
+        assert_eq!(sanitize_path(&long), None);
+    }
+
+    #[test]
+    fn sanitize_files_drops_unsafe_and_caps_count() {
+        let out = sanitize_files(&[
+            "src/a.rs".to_string(),
+            "../escape".to_string(),
+            "/abs".to_string(),
+            "src/b.rs".to_string(),
+        ]);
+        assert_eq!(out, vec!["src/a.rs".to_string(), "src/b.rs".to_string()]);
+    }
+
+    #[test]
+    fn propose_strips_unsafe_estimated_files() {
+        let mut s = ClaimStore::new();
+        let c = s
+            .propose(
+                "agent-1",
+                "t".into(),
+                "BUGFIX".into(),
+                vec![],
+                vec![
+                    "src/ok.rs".to_string(),
+                    "../bad".to_string(),
+                    "/abs".to_string(),
+                ],
+                0.9,
+            )
+            .unwrap();
+        assert_eq!(c.estimated_files, vec!["src/ok.rs".to_string()]);
+    }
 
     #[test]
     fn confidence_maps_to_status() {
