@@ -9,3 +9,6 @@ phase-0/results/hook-matrix.md
 
 # Rust build output
 /packages/coordify-core/target/
+
+# Coordify runtime state (sockets, tokens, logs, traces)
+**/.coordify/
