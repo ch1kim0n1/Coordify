@@ -2,6 +2,12 @@
 name = "coordify-core"
 version = "0.1.0"
 edition = "2021"
+description = "Multi-agent coordination daemon for Claude Code — CAP protocol over Unix sockets"
+license = "MIT"
+repository = "https://github.com/ch1kim0n1/Coordify"
+homepage = "https://github.com/ch1kim0n1/Coordify"
+keywords = ["claude", "ai", "coordination", "multi-agent"]
+categories = ["command-line-utilities", "development-tools"]
 
 [lib]
 name = "coordify_core"

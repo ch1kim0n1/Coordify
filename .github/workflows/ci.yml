@@ -40,3 +40,51 @@ jobs:
 
       - name: Tests + coverage gate
         run: cargo llvm-cov --fail-under-lines 90 -- --test-threads=4
+
+  coordify-hook:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/coordify-hook
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/coordify-hook/package-lock.json
+      - run: npm ci
+      - name: Unit tests (skip integration — no Core binary on CI)
+        run: node --test test/mapping.test.js test/install.test.js test/core-client.test.js
+
+  coordify-cli:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/coordify-cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/coordify-cli/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test
+
+  coordify-sim:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/coordify-sim
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: packages/coordify-sim/package-lock.json
+      - run: npm ci
+      - run: npm run build
+      - run: npm test

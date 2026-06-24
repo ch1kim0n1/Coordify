@@ -1,8 +1,21 @@
 {
   "name": "coordify-hook",
   "version": "0.1.0",
-  "private": true,
   "description": "Coordify Node hook adapter — per-session sidecar bridging Claude Code hooks to Coordify Core.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ch1kim0n1/Coordify.git",
+    "directory": "packages/coordify-hook"
+  },
+  "homepage": "https://github.com/ch1kim0n1/Coordify#readme",
+  "engines": { "node": ">=18" },
+  "files": [
+    "hooks/",
+    "lib/",
+    "sidecar.js",
+    "install.js"
+  ],
   "scripts": {
     "test": "node --test"
   }

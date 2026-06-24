@@ -148,20 +148,35 @@ Coupling is behavioral, not static. It is derived from what agents actually touc
 
 ## Install
 
+**1. Coordify Core** (Rust daemon — required):
+
 ```bash
-npm install -g coordify
+cargo install coordify-core
 ```
 
-Coordify Core ships as a single Rust binary. The CLI and hook adapter are TypeScript. No configuration required to start.
+Or build from source: `git clone https://github.com/ch1kim0n1/Coordify && cd Coordify/packages/coordify-core && cargo build --release`
+
+**2. Hook adapter** (wires Claude Code hooks):
+
+```bash
+npm install -g coordify-hook
+# then in your project root:
+node "$(npm root -g)/coordify-hook/install.js"
+```
+
+**3. CLI** (optional — query and watch):
+
+```bash
+npm install -g coordify-cli
+```
 
 ---
 
 ## Quickstart
 
 ```bash
-# Initialize in your project root
-cd my-project
-coordify init
+# Wire hooks once per project (run from your project root)
+node "$(npm root -g)/coordify-hook/install.js"
 
 # Open Claude Code terminals normally — Coordify handles the rest
 claude   # terminal 1
@@ -195,8 +210,8 @@ coordify stats
 | `coordify stats` | Engineering and resource metrics |
 | `coordify session list` | All recorded sessions |
 | `coordify session inspect` | Inspect a specific session |
-| `coordify simulate` | Run a fixture without Claude Code |
-| `coordify replay` | Replay a session event log |
+| `coordify-sim simulate` | Run a fixture without Claude Code |
+| `coordify-sim replay` | Replay a session event log |
 
 ---
 

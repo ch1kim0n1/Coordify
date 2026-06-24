@@ -1,8 +1,19 @@
 {
   "name": "coordify-sim",
   "version": "0.1.0",
-  "private": true,
   "description": "Coordify scenario runner and session replayer",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/ch1kim0n1/Coordify.git",
+    "directory": "packages/coordify-sim"
+  },
+  "homepage": "https://github.com/ch1kim0n1/Coordify#readme",
+  "engines": { "node": ">=18" },
+  "files": [
+    "dist/",
+    "scenarios/"
+  ],
   "main": "dist/cli.js",
   "bin": { "coordify-sim": "dist/cli.js" },
   "scripts": {
