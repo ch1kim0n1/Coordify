@@ -40,5 +40,5 @@ const validate = ajv.compile(SCHEMA);
 export function validateScript(raw: unknown): ScenarioScript | string[] {
   const valid = validate(raw);
   if (!valid) return (validate.errors ?? []).map(e => `${e.instancePath || '/'} ${e.message}`);
-  return raw as ScenarioScript;
+  return raw as unknown as ScenarioScript;
 }

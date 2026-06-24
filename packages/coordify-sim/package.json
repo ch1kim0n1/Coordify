@@ -6,7 +6,7 @@
   "main": "dist/cli.js",
   "bin": { "coordify-sim": "dist/cli.js" },
   "scripts": {
-    "build": "tsc",
+    "build": "tsc -p tsconfig.tui.json && tsc && node -e \"require('fs').cpSync('src/tui/package.json','dist/tui/package.json')\"",
     "test": "npx tsx --test 'test/**/*.test.ts' 'test/**/*.test.tsx'"
   },
   "dependencies": {
