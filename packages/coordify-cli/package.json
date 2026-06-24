@@ -4,7 +4,9 @@
   "private": true,
   "description": "Coordify CLI — query, watch, graph",
   "main": "dist/cli.js",
-  "bin": { "coordify": "dist/cli.js" },
+  "bin": {
+    "coordify": "dist/cli.js"
+  },
   "scripts": {
     "build": "tsc",
     "test": "npx tsx --test test/**/*.test.ts"
@@ -16,6 +18,7 @@
   "devDependencies": {
     "@types/node": "^20.0.0",
     "@types/react": "^18.2.0",
+    "ink-testing-library": "^4.0.0",
     "tsx": "^4.7.0",
     "typescript": "^5.4.0"
   }
