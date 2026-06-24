@@ -1,0 +1,24 @@
+{
+  "name": "coordify-sim",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Coordify scenario runner and session replayer",
+  "main": "dist/cli.js",
+  "bin": { "coordify-sim": "dist/cli.js" },
+  "scripts": {
+    "build": "tsc",
+    "test": "npx tsx --test 'test/**/*.test.ts' 'test/**/*.test.tsx'"
+  },
+  "dependencies": {
+    "ajv": "^8.14.0",
+    "ink": "^4.4.1",
+    "react": "^18.2.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/react": "^18.2.0",
+    "ink-testing-library": "^3.0.0",
+    "tsx": "^4.7.0",
+    "typescript": "^5.4.0"
+  }
+}
