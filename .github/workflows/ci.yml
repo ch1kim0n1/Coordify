@@ -48,6 +48,48 @@ jobs:
       - name: Tests + coverage gate
         run: cargo llvm-cov --fail-under-lines 90 -- --test-threads=4
 
+  # Separate audit job so a new advisory does not get masked by a build failure.
+  # Runs only on ubuntu to avoid wasting macOS minutes on a pure-metadata check.
+  cargo-audit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: packages/coordify-core
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install cargo-audit
+        uses: taiki-e/install-action@cargo-audit
+      - name: Install cargo-deny
+        uses: taiki-e/install-action@cargo-deny
+      - name: cargo audit (advisories)
+        run: cargo audit --deny warnings
+      - name: cargo deny (advisories + licenses + bans)
+        run: cargo deny check
+
+  npm-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+      - name: coordify-cli audit
+        working-directory: packages/coordify-cli
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+      - name: coordify-sim audit
+        working-directory: packages/coordify-sim
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+      - name: coordify-hook audit
+        working-directory: packages/coordify-hook
+        run: |
+          npm ci
+          npm audit --omit=dev --audit-level=high
+
   coordify-hook:
     runs-on: ${{ matrix.os }}
     strategy:

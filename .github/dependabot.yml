@@ -1,0 +1,49 @@
+version: 2
+updates:
+  # Rust dependencies — Cargo.lock is committed for the binary crate.
+  - package-ecosystem: "cargo"
+    directory: "/packages/coordify-core"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "rust"
+
+  # npm dependencies for each TS package.
+  - package-ecosystem: "npm"
+    directory: "/packages/coordify-hook"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+
+  - package-ecosystem: "npm"
+    directory: "/packages/coordify-cli"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+
+  - package-ecosystem: "npm"
+    directory: "/packages/coordify-sim"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+
+  # GitHub Actions versions — keep actions pinned and current.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
