@@ -1,7 +1,7 @@
 import { isLive, query } from '../ipc.js';
 
 export async function runClaims(root: string, opts: { json?: boolean }): Promise<void> {
-  if (!isLive(root)) { process.stdout.write('claims: no live network\n'); return; }
+  if (!isLive(root)) { process.stdout.write('coordify-core is not running; open a Claude Code session to start it\n'); return; }
   const resp = await query(root, 'get_state');
   if (!resp.ok) { process.stdout.write(`error: ${resp.error}\n`); return; }
   const claims = (resp.data as any)?.claims ?? [];

@@ -61,13 +61,26 @@ export class CoreClient {
 
 export async function query(root: string, action: string, payload: Record<string, unknown> = {}): Promise<IpcResponse> {
   const tok = readToken(root);
-  if (!tok) return { id: '?', ok: false, error: 'no token' };
+  if (!tok) return { id: '?', ok: false, error: 'coordify-core is not running; open a Claude Code session to start it' };
   const sock = socketPath(root);
   const client = new CoreClient(sock, tok);
   try {
     await client.connect();
     const resp = await client.query(action, payload);
+    // A stale token (Core restarted with a new one) surfaces as "unauthorized"
+    // from Core. Translate to a clearer, actionable message for the CLI user.
+    if (!resp.ok && resp.error === 'unauthorized') {
+      return { ...resp, error: 'coordify-core restarted; please retry' };
+    }
     return resp;
+  } catch (e) {
+    // Connection refused / Core crashed / stale socket. Never throw — return a
+    // consistent, actionable error so the CLI does not dump a stack trace.
+    const msg = e instanceof Error ? e.message : String(e);
+    if (msg.includes('ECONNREFUSED') || msg.includes('ENOENT') || msg.includes('connect')) {
+      return { id: '?', ok: false, error: 'coordify-core is not running; open a Claude Code session to start it' };
+    }
+    return { id: '?', ok: false, error: 'coordify-core unreachable: ' + msg };
   } finally {
     client.close();
   }

@@ -16,7 +16,15 @@ export async function runHeat(root: string, opts: { json?: boolean }): Promise<v
     edges = [...byPair.values()].sort((a, b) => b.heat - a.heat);
   }
   if (opts.json) { process.stdout.write(JSON.stringify(edges, null, 2) + '\n'); return; }
-  if (edges.length === 0) { process.stdout.write('no heat data\n'); return; }
+  if (edges.length === 0) {
+    // Distinguish "Core live but <2 agents" from "no data at all".
+    if (isLive(root)) {
+      process.stdout.write('need at least 2 agents to compute heat\n');
+    } else {
+      process.stdout.write('no heat data\n');
+    }
+    return;
+  }
   process.stdout.write('PAIR                          HEAT   BAND\n');
   for (const e of edges) {
     const pair = (e.pair ?? []).join(' ↔ ');

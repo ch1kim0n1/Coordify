@@ -12,7 +12,7 @@ export async function runSessionInspect(root: string, id: string, opts: { json?:
   const stats = readStats(root, id) as any;
   const summary = readSummary(root, id) as any;
   const ent = readEntertainment(root, id) as any;
-  if (!stats) { process.stdout.write(`session not found: ${id}\n`); return; }
+  if (!stats) { process.stdout.write(`no session with id '${id}'\n`); return; }
   if (opts.json) {
     process.stdout.write(JSON.stringify({ stats, summary, entertainment: ent }, null, 2) + '\n');
     return;
