@@ -8,12 +8,22 @@ function readJson<T>(filePath: string): T | null {
 
 export function listSessions(root: string): string[] {
   const dir = sessions(root);
-  try { return fs.readdirSync(dir).sort(); } catch { return []; }
+  let entries: string[];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); }
+  catch { return []; }
+  // Only directories (a stray file under sessions/ should not appear as a
+  // session), newest-first. Session ids are ISO-ish timestamps so lexical
+  // reverse = chronological reverse.
+  return entries
+    .filter(e => e.isDirectory())
+    .map(e => e.name)
+    .sort()
+    .reverse();
 }
 
 export function latestSession(root: string): string | null {
   const s = listSessions(root);
-  return s.length > 0 ? s[s.length - 1] : null;
+  return s.length > 0 ? s[0] : null;
 }
 
 export function readStats(root: string, id: string): Record<string, unknown> | null {

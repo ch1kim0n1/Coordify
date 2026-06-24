@@ -11,7 +11,7 @@
 [![version](https://img.shields.io/github/v/release/ch1kim0n1/coordify?style=flat-square&color=111111&label=release)](https://github.com/ch1kim0n1/coordify/releases)
 [![stars](https://img.shields.io/github/stars/ch1kim0n1/coordify?style=flat-square&color=111111&label=stars)](https://github.com/ch1kim0n1/coordify/stargazers)
 
-**Multi-agent coordination for Claude Code. Your agents. One codebase. No collisions.**
+**Multi-agent coordination for Claude Code. Your agents run normally. Coordify handles the rest.**
 
 </div>
 
@@ -23,7 +23,93 @@ Open five terminals, run `claude` in the same repo, assign each one a task. Each
 
 One agent refactors a file while another patches it. One drifts silently from a bugfix into a broad refactor. Two block on each other without noticing the deadlock. Historical conflict patterns disappear between sessions.
 
-Coordify fills that gap. It is not an orchestrator, not a master agent, not a cloud service. It is the missing coordination layer between independent terminal agents.
+Coordify is the coordination layer between them. It is not an orchestrator, not a master agent, not a cloud service.
+
+---
+
+## Install
+
+Coordify has two required components: **Coordify Core** (a Rust binary — the local runtime that owns state and calculates heat) and **Coordify Hooks** (a TypeScript adapter that wires Claude Code lifecycle events to Core). The CLI is optional but useful.
+
+**1. Coordify Core** (Rust daemon — required):
+
+```bash
+cargo install coordify-core
+```
+
+Or build from source: `git clone https://github.com/ch1kim0n1/Coordify && cd Coordify/packages/coordify-core && cargo build --release`
+
+**2. Hook adapter** (wires Claude Code hooks — run once per project):
+
+```bash
+npm install -g coordify-hook
+node "$(npm root -g)/coordify-hook/install.js"
+```
+
+**3. CLI** (optional — query and watch):
+
+```bash
+npm install -g coordify-cli
+```
+
+---
+
+## Quickstart
+
+```bash
+# Open Claude Code terminals normally — Coordify handles the rest
+claude   # terminal 1
+claude   # terminal 2
+claude   # terminal 3
+
+# Check live status from any terminal
+coordify status
+
+# See heat between all agent pairs
+coordify heat
+
+# Full session stats
+coordify stats
+```
+
+Example `coordify status` output:
+
+```
+Network: active   Agents: 3   Open conflicts: 1
+
+AGENT               STATE         TASK
+agent-a (pid 1234)  ACTIVE        Fix auth token expiry
+agent-b (pid 5678)  NEGOTIATING   Refactor session store
+agent-c (pid 9012)  IDLE          —
+
+HEAT
+  agent-a ↔ agent-b   74%  OVERLAP
+  agent-a ↔ agent-c    8%  SAFE
+  agent-b ↔ agent-c   12%  SAFE
+
+CONFLICTS
+  #1  agent-a ↔ agent-b  src/auth/session.ts  awaiting resolution
+```
+
+---
+
+## Troubleshooting
+
+**Core won't start / socket error on macOS**
+macOS Unix sockets have a 104-byte path limit. If your project path is long, Coordify will fail to bind. Move the project closer to the filesystem root or use a shorter path.
+
+**Hooks not firing**
+Run `coordify status` — if Core is not listed, re-run the hook installer from the project root:
+```bash
+node "$(npm root -g)/coordify-hook/install.js"
+```
+Hooks are per-project, not global.
+
+**Agent shows ORPHANED**
+The agent exited without a clean shutdown. Run `coordify claim release --orphaned` to clear stale claims. Other agents can also reclaim after the configured TTL (default: 5 minutes).
+
+**Core crashed mid-session**
+Agents do not silently pretend coordination is still active. Behavior depends on your configured escalation level — from warning-only up to blocking protected writes until Core recovers. Restart Core with `coordify-core` and agents will reconnect.
 
 ---
 
@@ -146,106 +232,58 @@ Coupling is behavioral, not static. It is derived from what agents actually touc
 
 ---
 
-## Install
-
-**1. Coordify Core** (Rust daemon — required):
-
-```bash
-cargo install coordify-core
-```
-
-Or build from source: `git clone https://github.com/ch1kim0n1/Coordify && cd Coordify/packages/coordify-core && cargo build --release`
-
-**2. Hook adapter** (wires Claude Code hooks):
-
-```bash
-npm install -g coordify-hook
-# then in your project root:
-node "$(npm root -g)/coordify-hook/install.js"
-```
-
-**3. CLI** (optional — query and watch):
-
-```bash
-npm install -g coordify-cli
-```
-
----
-
-## Quickstart
-
-```bash
-# Wire hooks once per project (run from your project root)
-node "$(npm root -g)/coordify-hook/install.js"
-
-# Open Claude Code terminals normally — Coordify handles the rest
-claude   # terminal 1
-claude   # terminal 2
-claude   # terminal 3
-
-# Check live status from any terminal
-coordify status
-
-# See heat between all agent pairs
-coordify heat
-
-# Full session stats
-coordify stats
-```
-
----
-
 ## CLI Reference
 
 | Command | Description |
 |---------|-------------|
-| `coordify status` | Live network summary |
-| `coordify agents` | All agents, states, and tasks |
-| `coordify heat` | Pairwise heat scores |
-| `coordify claims` | Active ownership claims |
-| `coordify conflicts` | Open conflicts and resolution state |
-| `coordify graph` | Dependency and coupling graph |
-| `coordify watch` | Live TUI |
+| `coordify status` | Active agents, their states, heat summary, and open conflicts |
+| `coordify agents` | All agents with states, tasks, and claim counts |
+| `coordify heat` | Pairwise heat scores between all active agent pairs |
+| `coordify claims` | Active ownership claims with domains and file estimates |
+| `coordify conflicts` | Open conflicts, resolution type, and current state |
+| `coordify graph` | Behavioral coupling graph built from session history |
+| `coordify watch` | Live TUI — refreshes automatically |
 | `coordify logs` | Session log output |
-| `coordify stats` | Engineering and resource metrics |
-| `coordify session list` | All recorded sessions |
-| `coordify session inspect` | Inspect a specific session |
-| `coordify-sim simulate` | Run a fixture without Claude Code |
+| `coordify stats` | Engineering metrics: coordination overhead, velocity, blocked time |
+| `coordify session list` | All recorded sessions with timestamps |
+| `coordify session inspect` | Inspect a specific session's events and heat history |
+| `coordify-sim simulate` | Run an agent scenario from a fixture without Claude Code |
 | `coordify-sim replay` | Replay a session event log |
 
 ---
 
 ## Configuration
 
-Coordify ships with opinionated defaults and **no required configuration** —
-first run works with zero config. Tuning is via environment variables; a
-`coordify.yaml` file is planned for a later release. Coordify makes **zero
-outbound network calls** and stores everything under `.coordify/` in your
-project root.
+Defaults are tuned for solo-to-small-team workloads. Override in `coordify.yaml` at the project root.
 
-### Environment variables
+```yaml
+heat:
+  safeMax: 25    # below 25% = independent work, no coordination needed
+  monitorMax: 50 # 26–50% = shared domain, surfaced to agent context
+  overlapMax: 75 # 51–75% = probable collision, warning issued
+  conflictMin: 76 # 76%+ = structured conflict opened
 
-All variables are optional. Defaults are sane for a single-machine,
-multi-agent workflow.
+claims:
+  orphanTtlSeconds: 300     # stale claim released after 5 minutes of silence
+  lowConfidenceRejectBelow: 0.45  # claims below 45% confidence are rejected outright
+  provisionalBelow: 0.75    # claims below 75% confidence are provisional until confirmed
 
-| Variable | Default | Purpose |
-|----------|---------|---------|
-| `COORDIFY_REAPER_INTERVAL_MS` | `2000` | How often Core reaps stale agents / sweeps orphans |
-| `COORDIFY_REAPER_TIMEOUT_MS` | `10000` | Agent heartbeat timeout before it is marked OFFLINE |
-| `COORDIFY_ORPHAN_TTL_MS` | `300000` | Time an orphaned claim lives before becoming reclaimable |
-| `COORDIFY_PROPOSAL_TIMEOUT_MS` | `60000` | Conflict proposal window before auto-escalation to the user |
-| `COORDIFY_KNOWLEDGE_K` | `5.0` | Saturating-curve constant for hotzone/coupling scores |
-| `COORDIFY_ROOT` | `process.cwd()` | Project root for `coordify-cli` and `coordify-sim` |
-| `COORDIFY_CORE_BIN` | PATH lookup | Path to the `coordify-core` binary (hook sidecar + sim) |
-| `COORDIFY_HEARTBEAT_MS` | `3000` | Hook sidecar heartbeat interval |
-| `COORDIFY_BOOT_TIMEOUT_MS` | `5000` | Hook sidecar wait for Core startup |
-| `COORDIFY_SKIP_CORE_CHECK` | unset | Set to `1` only for the install test harness — never in real installs |
-| `TMPDIR` | system temp | Used for the session socket fallback when the in-tree socket path exceeds the macOS 104-byte limit |
-| `CLAUDE_PROJECT_DIR` | unset | Claude Code's project dir; hook runner falls back to `payload.cwd` then `process.cwd()` |
+escalation:
+  defaultMode: coordinate
+  strictProtectedPaths:
+    - "schema.prisma"
+    - "src/auth/**"
+    - "infra/**"
 
-No secret is ever read from an env var. The only secret in the system is the
-per-session IPC token, generated by Core from `/dev/urandom` and never logged,
-printed, or sent over any network.
+logging:
+  traceLevel: verbose
+  compressOnSessionEnd: true
+
+knowledge:
+  enabled: true
+  hotzoneWeight: 0.10
+  couplingWeight: 0.10
+```
 
 ---
 
@@ -329,15 +367,13 @@ If Coordify Core crashes, agents do not silently pretend coordination is still a
 
 **MVP** is Claude Code CLI, local machine, single project root, CLI/TUI only. No web dashboard. No cloud. No cross-machine networking.
 
-**Post-MVP** includes Codex CLI support, open-source agent adapters, multi-machine networks, multi-repo coordination, and advanced dashboards.
+**Next:** Codex CLI adapter. Contributions welcome — see below.
 
 ---
 
 ## Contributing
 
-CAP is testable without Claude Code. Use `coordify simulate` with any fixture file to run agent scenarios locally. See `fixtures/` for examples.
-
-Before submitting a Core change, run the simulation suite:
+CAP is testable without Claude Code. Run any fixture to simulate agent scenarios locally:
 
 ```bash
 coordify simulate fixtures/simple-conflict.json
@@ -345,6 +381,18 @@ coordify simulate fixtures/deadlock.json
 coordify simulate fixtures/clear-reset.json
 coordify simulate fixtures/orphaned-claim.json
 ```
+
+**Before submitting a Core (Rust) change:** run the full simulation suite above. All four fixtures must pass.
+
+**Before submitting a Hooks/CLI (TypeScript) change:** run `npm test` in the relevant package.
+
+**What's welcome:**
+- Bug fixes with a failing fixture that reproduces the issue
+- New fixture scenarios for edge cases not currently covered
+- Codex CLI adapter (the highest-priority post-MVP item)
+- Documentation improvements
+
+Open an issue before starting large changes to Core architecture or the CAP protocol schema.
 
 ---
 

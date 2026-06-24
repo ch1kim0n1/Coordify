@@ -28,9 +28,11 @@ pub fn finalize(session: &Session, paths: &Paths, agents_seen: u64) -> std::io::
         "endedAt": crate::bootstrap::now_iso(),
         "agentsSeen": agents_seen,
     });
-    fs::write(
-        session.dir.join("network-final.json"),
-        serde_json::to_string_pretty(&final_doc)?,
+    // Atomic write (temp + rename) so a crash mid-finalize cannot leave a
+    // half-written network-final.json that breaks `coordify session list`.
+    crate::knowledge::write_atomic(
+        &session.dir.join("network-final.json"),
+        &serde_json::to_string_pretty(&final_doc)?,
     )?;
     // Remove runtime files; not-found is fine (already gone / never created).
     for p in [
