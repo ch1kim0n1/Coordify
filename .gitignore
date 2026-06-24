@@ -1,6 +1,7 @@
 # Phase 0 — raw hook payloads may contain prompt content
 docs/internal/phase-0/results/payloads/
 docs/internal/phase-0/results/latency.jsonl
+.claude/settings.json
 .claude/settings.json.backup
 docs/internal/phase-0/results/hook-matrix.md
 
