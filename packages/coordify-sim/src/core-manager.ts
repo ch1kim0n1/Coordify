@@ -1,4 +1,3 @@
-import net from 'net';
 import fs from 'fs';
 import path from 'path';
 import { spawn, ChildProcess } from 'child_process';
@@ -58,9 +57,11 @@ export class CoreManager {
       stdio: 'ignore',
       env: { ...process.env },
     });
-    child.on('error', err => { throw err; });
     this.spawned = child;
-    await waitForSocket(sock, 5000);
+    const spawnError = new Promise<never>((_, reject) => {
+      child.on('error', reject);
+    });
+    await Promise.race([waitForSocket(sock, 5000), spawnError]);
     const tok = readToken(this.root) ?? '';
     return { socketPath: sock, token: tok, spawned: true };
   }
