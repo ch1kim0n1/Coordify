@@ -1,0 +1,10 @@
+{
+  "name": "orphaned-claim",
+  "agents": ["agent-a", "agent-b"],
+  "steps": [
+    { "delay_ms": 0,   "event": { "type": "CLAIM_PROPOSED", "agentId": "agent-a", "task": { "summary": "Will orphan" }, "intent": "BUGFIX", "domains": ["src"], "estimatedFiles": ["src/legacy.rs"], "confidence": 0.9 } },
+    { "delay_ms": 100, "event": { "type": "CLAIM_PROPOSED", "agentId": "agent-b", "task": { "summary": "Independent work" }, "intent": "DOCUMENTATION", "domains": ["docs"], "estimatedFiles": ["docs/readme.md"], "confidence": 0.9 } }
+  ],
+  "finalize": false,
+  "_note": "agent-a departs without releasing its claim; Core's reaper orphans the claim after COORDIFY_REAPER_TIMEOUT_MS and reclaims it after COORDIFY_ORPHAN_TTL_MS. Reclamation is unit-tested in packages/coordify-core/src/claim.rs; this fixture exercises the departure path. To observe orphan+reclaim live, run with COORDIFY_REAPER_TIMEOUT_MS=1000 COORDIFY_ORPHAN_TTL_MS=2000 and keep agent-b connected."
+}

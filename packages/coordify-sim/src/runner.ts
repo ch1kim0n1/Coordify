@@ -50,13 +50,34 @@ class SimClient {
   }
 
   async registerAgent(agentId: string) {
-    const resp = await this.send('register', { meta: { agentId } });
+    // Sim agents share a simulated branch so branch-proximity heat is non-zero
+    // and overlapping claims can reach CONFLICT_CANDIDATE, matching how real
+    // Claude Code agents on the same repo branch interact.
+    const resp = await this.send('register', { meta: { agentId, branch: 'main' } });
     if (resp.agent_id) this.agentTokens.set(agentId, resp.agent_id);
     return resp;
   }
 
+  // Core assigns its own agent ids at register time (agent-1, agent-2, ...).
+  // Scenario scripts use stable human names (agent-a, ...); remap every agent
+  // reference in the event to the Core-assigned id before submitting, otherwise
+  // Core rejects with AGENT_NOT_FOUND.
+  private remapAgents(event: Record<string, unknown>): Record<string, unknown> {
+    const map = (v: unknown): unknown => {
+      if (typeof v === 'string' && this.agentTokens.has(v)) return this.agentTokens.get(v);
+      if (Array.isArray(v)) return v.map(map);
+      if (v && typeof v === 'object') {
+        const out: Record<string, unknown> = {};
+        for (const [k, val] of Object.entries(v)) out[k] = map(val);
+        return out;
+      }
+      return v;
+    };
+    return map(event) as Record<string, unknown>;
+  }
+
   async submitEvent(event: Record<string, unknown>) {
-    return this.send('submit_event', { capVersion: '0.1', event });
+    return this.send('submit_event', { capVersion: '0.1', event: this.remapAgents(event) });
   }
 
   close() { try { this.sock?.end(); } catch (_) {} this.sock = null; }
