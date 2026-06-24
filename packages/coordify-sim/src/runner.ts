@@ -8,6 +8,9 @@ class SimClient {
   private seq = 0;
   private pending = new Map<string, (r: any) => void>();
   private agentTokens = new Map<string, string>();
+  private conflictTokens = new Map<string, string>(); // "conflict-1" -> core-assigned id
+  private knownConflictIds = new Set<string>();
+  private conflictSeq = 0;
 
   constructor(private sockPath: string, private masterToken: string) {}
 
@@ -76,8 +79,42 @@ class SimClient {
     return map(event) as Record<string, unknown>;
   }
 
+  private remapConflicts(event: Record<string, unknown>): Record<string, unknown> {
+    const map = (v: unknown): unknown => {
+      if (typeof v === 'string' && this.conflictTokens.has(v)) return this.conflictTokens.get(v);
+      if (Array.isArray(v)) return v.map(map);
+      if (v && typeof v === 'object') {
+        const out: Record<string, unknown> = {};
+        for (const [k, val] of Object.entries(v)) out[k] = map(val);
+        return out;
+      }
+      return v;
+    };
+    return map(event) as Record<string, unknown>;
+  }
+
+  async snapshotExistingConflicts(): Promise<void> {
+    const resp = await this.send('get_state');
+    const conflicts: Array<{ conflictId: string }> = resp.data?.conflicts ?? [];
+    for (const c of conflicts) this.knownConflictIds.add(c.conflictId);
+  }
+
+  private async syncConflicts(): Promise<void> {
+    const resp = await this.send('get_state');
+    const conflicts: Array<{ conflictId: string }> = resp.data?.conflicts ?? [];
+    for (const c of conflicts) {
+      if (!this.knownConflictIds.has(c.conflictId)) {
+        this.knownConflictIds.add(c.conflictId);
+        this.conflictTokens.set(`conflict-${++this.conflictSeq}`, c.conflictId);
+      }
+    }
+  }
+
   async submitEvent(event: Record<string, unknown>) {
-    return this.send('submit_event', { capVersion: '0.1', event: this.remapAgents(event) });
+    const remapped = this.remapConflicts(this.remapAgents(event));
+    const resp = await this.send('submit_event', { capVersion: '0.1', event: remapped });
+    if ((event as any).type === 'CLAIM_PROPOSED') await this.syncConflicts();
+    return resp;
   }
 
   close() { try { this.sock?.end(); } catch (_) {} this.sock = null; }
@@ -105,6 +142,7 @@ export async function runScenario(
   for (const agentId of script.agents) {
     await client.registerAgent(agentId);
   }
+  await client.snapshotExistingConflicts();
 
   for (let i = 0; i < script.steps.length; i++) {
     const step = script.steps[i];

@@ -298,9 +298,9 @@ Coordify has four components.
 | Component | Language | Role |
 |-----------|----------|------|
 | **Coordify Core** | Rust | Local runtime and source of truth |
-| **Coordify Hooks** | TypeScript | Claude Code hook adapter |
-| **Coordify CLI** | TypeScript | User-facing command surface |
-| **Coordify TUI** | TypeScript | Optional live terminal UI |
+| **Coordify Hook** | TypeScript | Claude Code hook adapter |
+| **Coordify CLI** | TypeScript | User-facing command surface + TUI |
+| **Coordify Sim** | TypeScript | Simulation runner + replay TUI |
 
 Core is a single static binary. It owns canonical live state. It validates every CAP event before mutating state. It never calls an LLM to decide heat. Agents propose. Core commits.
 
@@ -316,15 +316,15 @@ process-alive check, ACL-based file perms) is tracked as a future milestone.
 coordify/
   packages/
     coordify-core/       # Rust local runtime
-    coordify-cli/        # TypeScript CLI wrapper
-    coordify-hooks/      # Claude Code hook adapter
-    coordify-schemas/    # JSON Schemas for CAP / config / storage
-    coordify-tui/        # Terminal UI
-    coordify-sim/        # Simulation runner
+    coordify-hook/       # Claude Code hook adapter
+    coordify-cli/        # TypeScript CLI + live TUI
+    coordify-sim/        # Simulation runner + replay TUI
 
-  fixtures/
+  packages/coordify-sim/scenarios/
     simple-conflict.json
+    two-agent-conflict.json
     deadlock.json
+    deadlock-three-agents.json
     clear-reset.json
     orphaned-claim.json
 ```
@@ -388,16 +388,16 @@ so it runs fine on an air-gapped machine after install.
 
 ## Contributing
 
-CAP is testable without Claude Code. Run any fixture to simulate agent scenarios locally:
+CAP is testable without Claude Code. Run any scenario to simulate agent behavior locally:
 
 ```bash
-coordify simulate fixtures/simple-conflict.json
-coordify simulate fixtures/deadlock.json
-coordify simulate fixtures/clear-reset.json
-coordify simulate fixtures/orphaned-claim.json
+coordify-sim simulate packages/coordify-sim/scenarios/simple-conflict.json
+coordify-sim simulate packages/coordify-sim/scenarios/deadlock.json
+coordify-sim simulate packages/coordify-sim/scenarios/clear-reset.json
+coordify-sim simulate packages/coordify-sim/scenarios/orphaned-claim.json
 ```
 
-**Before submitting a Core (Rust) change:** run the full simulation suite above. All four fixtures must pass.
+**Before submitting a Core (Rust) change:** run the full simulation suite above. All scenarios must pass.
 
 **Before submitting a Hooks/CLI (TypeScript) change:** run `npm test` in the relevant package.
 
