@@ -64,6 +64,7 @@ function gitBranch() {
 
 async function main() {
   fs.mkdirSync(paths.agentsDir(ROOT), { recursive: true });
+  fs.mkdirSync(path.dirname(paths.sessionSock(ROOT, SESSION_ID)), { recursive: true });
   await ensureCore();
 
   const token = (await fsp.readFile(paths.token(ROOT), 'utf8')).trim();

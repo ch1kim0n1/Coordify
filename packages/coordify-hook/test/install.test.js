@@ -19,6 +19,6 @@ test('install.js writes 7 hooks and backs up existing settings', () => {
   for (const h of ['SessionStart', 'UserPromptSubmit', 'PreToolUse', 'PostToolUse', 'SubagentStart', 'SubagentStop', 'SessionEnd']) {
     assert.ok(names.includes(h), 'has hook ' + h);
   }
-  assert.match(settings.hooks.SessionStart[0].command, /coordify-hook\/hooks\/session-start\.js/);
+  assert.match(settings.hooks.SessionStart[0].hooks[0].command, /coordify-hook\/hooks\/session-start\.js/);
   assert.ok(fs.existsSync(path.join(dir, '.claude', 'settings.json.backup')), 'backed up');
 });

@@ -44,8 +44,6 @@ test('full hook pipe registers, claims, state-changes, releases', async (t) => {
   const bin = coreBin();
   if (!bin) { t.skip('coordify-core binary not built (run: cd packages/coordify-core && cargo build)'); return; }
 
-  // Use /tmp directly: on macOS os.tmpdir() returns a long /var/folders/… path
-  // that pushes the per-session Unix socket beyond the 104-byte macOS limit.
   const root = fs.mkdtempSync('/tmp/cc-int-');
   const SESSION = 's1';
   const sockPath = paths.sessionSock(root, SESSION);
