@@ -1,8 +1,8 @@
 # Phase 0 — raw hook payloads may contain prompt content
-phase-0/results/payloads/
-phase-0/results/latency.jsonl
+docs/internal/phase-0/results/payloads/
+docs/internal/phase-0/results/latency.jsonl
 .claude/settings.json.backup
-phase-0/results/hook-matrix.md
+docs/internal/phase-0/results/hook-matrix.md
 
 # SDD scratch (briefs, reports, diffs, progress ledger) — session-local
 .superpowers/

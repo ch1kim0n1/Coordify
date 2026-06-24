@@ -74,11 +74,23 @@ No telemetry, no analytics, no error reporting, no update checks, no cloud.
 
 ## Reporting a vulnerability
 
-Please report security issues privately by opening a **draft** GitHub Security
-Advisory at https://github.com/ch1kim0n1/Coordify/security/advisories/new, or
-email the maintainer. Do not open a public issue for security vulnerabilities.
-Include reproduction steps and affected versions. You will receive a response
-within 7 days.
+**Do not open a public issue for security vulnerabilities.**
+
+Report security issues privately by opening a **draft** GitHub Security
+Advisory at
+[https://github.com/ch1kim0n1/Coordify/security/advisories/new](https://github.com/ch1kim0n1/Coordify/security/advisories/new).
+This is the only private reporting channel — no email address is published.
+
+Include:
+
+- Affected version (output of `coordify-core --version`)
+- Reproduction steps (smallest possible)
+- Impact assessment (what an attacker could do)
+- Suggested fix, if you have one
+
+You will receive a response within 7 days. Coordinated disclosure: we will
+credit reporters in the release notes and advisory unless you prefer to remain
+anonymous.
 
 ## Hardening posture (0.1.0)
 

@@ -8,8 +8,8 @@
 [![Claude Code](https://img.shields.io/badge/claude-code-111111?style=flat-square)](https://claude.ai/code)
 [![CAP Protocol](https://img.shields.io/badge/protocol-CAP-111111?style=flat-square)](#architecture)
 [![local-first](https://img.shields.io/badge/local--first-%E2%9C%93-111111?style=flat-square)](#scope)
-[![version](https://img.shields.io/github/v/release/ch1kim0n1/coordify?style=flat-square&color=111111&label=release)](https://github.com/ch1kim0n1/coordify/releases)
-[![stars](https://img.shields.io/github/stars/ch1kim0n1/coordify?style=flat-square&color=111111&label=stars)](https://github.com/ch1kim0n1/coordify/stargazers)
+[![version](https://img.shields.io/github/v/release/ch1kim0n1/Coordify?style=flat-square&color=111111&label=release)](https://github.com/ch1kim0n1/Coordify/releases)
+[![stars](https://img.shields.io/github/stars/ch1kim0n1/Coordify?style=flat-square&color=111111&label=stars)](https://github.com/ch1kim0n1/Coordify/stargazers)
 
 **Multi-agent coordination for Claude Code. Your agents run normally. Coordify handles the rest.**
 
@@ -32,6 +32,11 @@ Coordify is the coordination layer between them. It is not an orchestrator, not 
 > **Platform support:** macOS and Linux. Windows is not supported in 0.1.0
 > (tracked as a future milestone — see Architecture). Requires Node ≥ 18 and
 > Rust stable.
+>
+> **CI:** ubuntu-only. macOS is a supported platform but is verified manually
+> before each release (see [RELEASE.md](RELEASE.md)) because macOS GitHub
+> Actions minutes are paid even for public repos. Linux gets full automated
+> coverage (build, clippy, tests, coverage gate, audits).
 
 Coordify has two required components: **Coordify Core** (a Rust binary — the local runtime that owns state and calculates heat) and **Coordify Hooks** (a TypeScript adapter that wires Claude Code lifecycle events to Core). The CLI is optional but useful.
 
@@ -110,7 +115,7 @@ node "$(npm root -g)/coordify-hook/install.js"
 Hooks are per-project, not global.
 
 **Agent shows ORPHANED**
-The agent exited without a clean shutdown. Run `coordify claim release --orphaned` to clear stale claims. Other agents can also reclaim after the configured TTL (default: 5 minutes).
+The agent exited without a clean shutdown. Its claims are marked `ORPHANED` and become reclaimable by other agents after the TTL (default: 5 minutes). A manual `coordify claim release` command is planned for 0.2.
 
 **Core crashed mid-session**
 Agents do not silently pretend coordination is still active. Behavior depends on your configured escalation level — from warning-only up to blocking protected writes until Core recovers. Restart Core with `coordify-core` and agents will reconnect.
@@ -258,36 +263,22 @@ Coupling is behavioral, not static. It is derived from what agents actually touc
 
 ## Configuration
 
-Defaults are tuned for solo-to-small-team workloads. Override in `coordify.yaml` at the project root.
+Coordify 0.1.0 ships with sensible defaults tuned for solo-to-small-team
+workloads. All thresholds (heat bands, claim confidence floors, orphan TTL,
+protected paths, knowledge weights) are compiled into Core and cannot yet be
+overridden at runtime. A `coordify.yaml` project config file is planned for
+0.2 — see the roadmap below.
 
-```yaml
-heat:
-  safeMax: 25    # below 25% = independent work, no coordination needed
-  monitorMax: 50 # 26–50% = shared domain, surfaced to agent context
-  overlapMax: 75 # 51–75% = probable collision, warning issued
-  conflictMin: 76 # 76%+ = structured conflict opened
+### Current defaults (compiled in)
 
-claims:
-  orphanTtlSeconds: 300     # stale claim released after 5 minutes of silence
-  lowConfidenceRejectBelow: 0.45  # claims below 45% confidence are rejected outright
-  provisionalBelow: 0.75    # claims below 75% confidence are provisional until confirmed
-
-escalation:
-  defaultMode: coordinate
-  strictProtectedPaths:
-    - "schema.prisma"
-    - "src/auth/**"
-    - "infra/**"
-
-logging:
-  traceLevel: verbose
-  compressOnSessionEnd: true
-
-knowledge:
-  enabled: true
-  hotzoneWeight: 0.10
-  couplingWeight: 0.10
-```
+| Setting | Default | Notes |
+|---------|---------|-------|
+| Heat bands | Safe ≤25, Monitor ≤50, Overlap ≤75, Conflict ≥76 | Percentages |
+| Orphan TTL | 300 s | Stale claim reclaimable after 5 min. Override via `COORDIFY_ORPHAN_TTL_MS` env var |
+| Low-confidence reject | < 0.45 | Claims below 45% confidence rejected outright |
+| Provisional claim | < 0.75 | Claims below 75% confidence held as provisional |
+| Knowledge hotzone weight | 0.10 | Heat formula component |
+| Knowledge coupling weight | 0.10 | Heat formula component |
 
 ---
 
@@ -352,20 +343,13 @@ coordify/
     hotzones.json
     coupling-graph.json
     velocity-profiles.json
-
-  config/
-    coordify.yaml
 ```
 
 Runtime files are ephemeral. Sessions and knowledge persist.
 
 ### Crash Handling
 
-If an agent exits without a clean shutdown, its claims become `ORPHANED` with a TTL instead of disappearing. Other agents can reclaim after TTL, or you can force release:
-
-```bash
-coordify claim release --orphaned
-```
+If an agent exits without a clean shutdown, its claims become `ORPHANED` with a TTL instead of disappearing. Other agents can reclaim after the TTL (default 5 minutes, override via `COORDIFY_ORPHAN_TTL_MS`). A manual `coordify claim release` command is planned for 0.2.
 
 If Coordify Core crashes, agents do not silently pretend coordination is still active. Behavior depends on your configured escalation level, from warning-only up to blocking protected writes until Core recovers.
 
@@ -382,7 +366,7 @@ via `cargo install coordify-core` and `npm install -g coordify-hook coordify-cli
 coordify-sim` — no account required. Coordify makes zero outbound network calls,
 so it runs fine on an air-gapped machine after install.
 
-**Next:** Codex CLI adapter. Contributions welcome — see below.
+**Next:** see the [Roadmap](#roadmap). Contributions welcome — see below.
 
 ---
 
@@ -408,6 +392,18 @@ coordify-sim simulate packages/coordify-sim/scenarios/orphaned-claim.json
 - Documentation improvements
 
 Open an issue before starting large changes to Core architecture or the CAP protocol schema.
+
+---
+
+## Roadmap
+
+Post-0.1.0, in rough priority order:
+
+- **Codex CLI adapter** — highest priority. Same CAP, different host.
+- **`coordify.yaml` project config** — runtime-overridable heat bands, claim thresholds, protected paths, knowledge weights.
+- **`coordify claim release`** — manual orphan/stale claim cleanup (currently TTL-only).
+- **Windows support** — named pipes, `BCryptGenRandom`, ACL-based file perms.
+- **Cross-machine networking** — optional, opt-in, for distributed teams.
 
 ---
 

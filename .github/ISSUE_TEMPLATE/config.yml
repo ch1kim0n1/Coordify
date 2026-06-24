@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Security report
+    url: https://github.com/ch1kim0n1/Coordify/security/advisories/new
+    about: Reporting a vulnerability? Use a private GitHub Security Advisory, not an issue. See SECURITY.md.
+  - name: Question or discussion
+    url: https://github.com/ch1kim0n1/Coordify/discussions
+    about: Questions and general discussion go in GitHub Discussions.
