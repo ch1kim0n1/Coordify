@@ -1,0 +1,13 @@
+{
+  "name": "deadlock-three-agents",
+  "agents": ["agent-a", "agent-b", "agent-c"],
+  "steps": [
+    { "delay_ms": 0,   "event": { "type": "AGENT_JOINED", "agentId": "agent-a" } },
+    { "delay_ms": 0,   "event": { "type": "AGENT_JOINED", "agentId": "agent-b" } },
+    { "delay_ms": 0,   "event": { "type": "AGENT_JOINED", "agentId": "agent-c" } },
+    { "delay_ms": 100, "event": { "type": "CLAIM_PROPOSED", "agentId": "agent-a", "taskSummary": "Task A", "intent": "BUGFIX", "domains": ["src"], "estimatedFiles": ["src/x.rs"], "confidence": 0.9 } },
+    { "delay_ms": 150, "event": { "type": "CLAIM_PROPOSED", "agentId": "agent-b", "taskSummary": "Task B", "intent": "BUGFIX", "domains": ["src"], "estimatedFiles": ["src/x.rs", "src/y.rs"], "confidence": 0.9 } },
+    { "delay_ms": 200, "event": { "type": "CLAIM_PROPOSED", "agentId": "agent-c", "taskSummary": "Task C", "intent": "BUGFIX", "domains": ["src"], "estimatedFiles": ["src/y.rs"], "confidence": 0.9 } }
+  ],
+  "finalize": true
+}

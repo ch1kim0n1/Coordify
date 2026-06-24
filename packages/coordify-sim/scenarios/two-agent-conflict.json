@@ -1,0 +1,12 @@
+{
+  "name": "two-agent-conflict",
+  "agents": ["agent-a", "agent-b"],
+  "steps": [
+    { "delay_ms": 0,   "event": { "type": "AGENT_JOINED", "agentId": "agent-a" } },
+    { "delay_ms": 100, "event": { "type": "CLAIM_PROPOSED", "agentId": "agent-a", "taskSummary": "Fix auth bug", "intent": "BUGFIX", "domains": ["src"], "estimatedFiles": ["src/auth.rs"], "confidence": 0.9 } },
+    { "delay_ms": 200, "event": { "type": "AGENT_JOINED", "agentId": "agent-b" } },
+    { "delay_ms": 300, "event": { "type": "CLAIM_PROPOSED", "agentId": "agent-b", "taskSummary": "Add auth tests", "intent": "TESTING", "domains": ["src"], "estimatedFiles": ["src/auth.rs"], "confidence": 0.9 } },
+    { "delay_ms": 500, "event": { "type": "FILE_TOUCHED", "agentId": "agent-a", "files": ["src/auth.rs"] } }
+  ],
+  "finalize": true
+}
