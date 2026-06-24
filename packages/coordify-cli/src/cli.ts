@@ -29,6 +29,11 @@ Options:
   --root    Project root (default: cwd)
 `;
 
+// TUI modules are compiled as ESM (tsconfig.tui.json). CJS require() cannot load them.
+// We use new Function to get a real import() at runtime, invisible to tsc's static resolver.
+// eslint-disable-next-line @typescript-eslint/no-implied-eval
+const esmImport: (m: string) => Promise<Record<string, unknown>> = new Function('m', 'return import(m)') as never;
+
 const argv = process.argv.slice(2);
 const root = (() => {
   const i = argv.indexOf('--root');
@@ -62,15 +67,15 @@ async function main() {
       break;
     }
     case 'watch': {
-      const { renderWatch } = await import('./tui/watch.js');
-      await renderWatch(root);
+      const { renderWatch } = await esmImport(require.resolve('./tui/watch.js'));
+      await (renderWatch as (root: string) => Promise<void>)(root);
       break;
     }
     case 'graph': {
-      const { renderGraph } = await import('./tui/graph.js');
+      const { renderGraph } = await esmImport(require.resolve('./tui/graph.js'));
       const mode = argv.includes('--heat') ? 'heat' : 'coupling';
       const top = Number(argv[argv.indexOf('--top') + 1] ?? 20);
-      await renderGraph(root, mode, top);
+      await (renderGraph as (root: string, mode: string, top: number) => Promise<void>)(root, mode, top);
       break;
     }
     case '--help':
