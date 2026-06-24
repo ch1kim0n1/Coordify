@@ -186,6 +186,10 @@ impl ClaimStore {
     pub fn is_empty(&self) -> bool {
         self.claims.is_empty()
     }
+
+    pub fn all_active(&self) -> impl Iterator<Item = &Claim> {
+        self.claims.values().filter(|c| c.orphaned_at_ms.is_none())
+    }
 }
 
 #[cfg(test)]

@@ -41,6 +41,17 @@ impl HeatStore {
     pub fn is_empty(&self) -> bool {
         self.edges.is_empty()
     }
+
+    pub fn snapshot(&self) -> Vec<serde_json::Value> {
+        self.edges
+            .iter()
+            .map(|((a, b), r)| serde_json::json!({
+                "pair": [a, b],
+                "heat": r.heat,
+                "band": r.band.as_str()
+            }))
+            .collect()
+    }
 }
 
 #[cfg(test)]

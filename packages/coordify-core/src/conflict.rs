@@ -204,6 +204,10 @@ impl ConflictStore {
             .map(|c| c.conflict_id.clone())
             .collect()
     }
+
+    pub fn all_open(&self) -> Vec<&Conflict> {
+        self.open.values().collect()
+    }
 }
 
 #[derive(Debug, Clone)]

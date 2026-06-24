@@ -67,6 +67,44 @@ pub fn handle_request(shared: &Shared, req: &Request) -> Response {
             }
         }
         "submit_event" => handle_cap_event(shared, req),
+        "get_state" => {
+            let (agents_json, claims_json) = {
+                let st = shared.state.lock().unwrap();
+                let agents = st.agent_ids().into_iter().map(|id| {
+                    let state_val = st.agent_state(&id)
+                        .map(|s| serde_json::to_value(s).unwrap_or(serde_json::Value::Null))
+                        .unwrap_or(serde_json::Value::Null);
+                    let claim_id = st.claims.live_claim_for(&id).map(|c| c.claim_id.clone());
+                    serde_json::json!({ "agentId": id, "state": state_val, "claimId": claim_id })
+                }).collect::<Vec<_>>();
+                let claims = st.claims.all_active().map(|c| serde_json::json!({
+                    "claimId": c.claim_id,
+                    "agentId": c.agent_id,
+                    "files": c.actual_files.iter().chain(c.estimated_files.iter())
+                                .collect::<std::collections::BTreeSet<_>>()
+                })).collect::<Vec<_>>();
+                (agents, claims)
+            };
+            let heat_json = shared.heat.lock().unwrap().snapshot();
+            let conflicts_json = {
+                shared.conflicts.lock().unwrap().all_open().iter().map(|c| {
+                    let age_ms = now_ms().saturating_sub(c.opened_at_ms);
+                    serde_json::json!({
+                        "conflictId": c.conflict_id,
+                        "agents": [c.agents.0, c.agents.1],
+                        "paths": c.paths,
+                        "state": c.state.as_str(),
+                        "ageMs": age_ms
+                    })
+                }).collect::<Vec<_>>()
+            };
+            Response::ok_with_data(&req.id, serde_json::json!({
+                "agents": agents_json,
+                "claims": claims_json,
+                "heat": heat_json,
+                "conflicts": conflicts_json
+            }))
+        }
         _ => Response::err(&req.id, "unknown action"),
     }
 }
@@ -1475,5 +1513,37 @@ mod tests {
         assert!(handle_request(&s, &cap_req("good", release)).ok);
         let store = s.heat.lock().unwrap();
         assert!(store.get(&a, &b).is_none(), "edge should be dropped after release");
+    }
+
+    #[test]
+    fn get_state_returns_live_snapshot() {
+        let s = shared_for_test("good");
+        // Register agent and give it a claim
+        let reg = handle_request(&s, &{ let mut r = req("good", "register"); r.meta = serde_json::json!({}); r });
+        let agent_id = reg.agent_id.clone().unwrap();
+        let mut claim_req = req("good", "submit_event");
+        claim_req.cap_version = Some("0.1".into());
+        claim_req.agent_id = Some(agent_id.clone());
+        claim_req.event = serde_json::json!({
+            "type": "CLAIM_PROPOSED",
+            "agentId": agent_id,
+            "taskSummary": "test task",
+            "intent": "BUGFIX",
+            "domains": ["src"],
+            "estimatedFiles": ["src/x.rs"],
+            "confidence": 0.9
+        });
+        handle_request(&s, &claim_req);
+
+        let state_req = req("good", "get_state");
+        let resp = handle_request(&s, &state_req);
+        assert!(resp.ok);
+        let data = resp.data.unwrap();
+        let agents = data["agents"].as_array().unwrap();
+        assert_eq!(agents.len(), 1);
+        assert_eq!(agents[0]["agentId"], agent_id);
+        assert!(data["claims"].as_array().unwrap().len() >= 1 || data["agents"][0]["claimId"].is_string());
+        let heat = data["heat"].as_array().unwrap();
+        assert!(heat.is_empty()); // no heat yet with one agent
     }
 }
