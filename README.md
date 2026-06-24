@@ -17,6 +17,18 @@
 
 ---
 
+## Quick Install
+
+```bash
+cargo install coordify-core
+npm install -g coordify-hook coordify-cli coordify-sim
+node "$(npm root -g)/coordify-hook/install.js"   # run once per project
+```
+
+That's it. Open multiple `claude` terminals in the same project — Coordify handles the rest.
+
+---
+
 ## The Problem
 
 Open five terminals, run `claude` in the same repo, assign each one a task. Each agent understands the codebase. None of them understand each other.

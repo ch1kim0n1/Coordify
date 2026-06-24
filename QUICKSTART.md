@@ -2,11 +2,24 @@
 
 Get Coordify running in under 5 minutes. macOS or Linux. Node ≥ 18, Rust stable.
 
+```bash
+# Install everything
+cargo install coordify-core
+npm install -g coordify-hook coordify-cli coordify-sim
+
+# Wire hooks into your project (run once per project root)
+node "$(npm root -g)/coordify-hook/install.js"
+
+# Verify
+coordify-core --version    # → coordify-core 0.1.0
+coordify --version         # → coordify 0.1.0
+```
+
 ---
 
 ## 1. Install
 
-### Option A — Published packages (fastest, 3 commands)
+### Option A — Published packages (fastest)
 
 ```bash
 cargo install coordify-core
