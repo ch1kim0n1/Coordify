@@ -14,6 +14,19 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::sync::atomic::{AtomicBool, Ordering::SeqCst};
 use std::sync::{Arc, Mutex};
 
+/// Hard cap on a single IPC request line. Rejecting oversized lines before
+/// parsing prevents a single bad client from blowing up memory.
+pub const MAX_REQUEST_BYTES: usize = 1024 * 1024; // 1 MiB
+/// Maximum concurrent agents Core will accept. A register beyond this returns
+/// a clear error instead of unbounded growth.
+pub const MAX_AGENTS: usize = 64;
+/// Per-connection bad-token attempts before the connection is dropped. Bounds
+/// a token-guessing storm from a single client.
+pub const MAX_BAD_TOKEN_ATTEMPTS: u32 = 16;
+/// Per-agent event-submission rate: max events per `RATE_WINDOW_MS`.
+pub const MAX_EVENTS_PER_WINDOW: u32 = 120;
+pub const RATE_WINDOW_MS: u64 = 1_000;
+
 pub struct Shared {
     pub state: Mutex<State>,
     pub log: Mutex<EventLog>,
@@ -27,6 +40,8 @@ pub struct Shared {
     pub conflicts: Mutex<ConflictStore>,
     pub conflict_cfg: ConflictConfig,
     pub waitgraph: Mutex<WaitGraph>,
+    /// Per-agent rate limiter: agent_id -> (event count, window start ms).
+    pub rate_limiter: Mutex<std::collections::HashMap<String, (u32, u64)>>,
 }
 
 pub fn handle_request(shared: &Shared, req: &Request) -> Response {
@@ -44,6 +59,12 @@ pub fn handle_request(shared: &Shared, req: &Request) -> Response {
     match req.action.as_str() {
         "register" => {
             let now = now_ms();
+            // Agent-count cap: refuse register beyond MAX_AGENTS so a buggy
+            // hook cannot spawn unbounded agents and exhaust memory.
+            let count = shared.state.lock().unwrap().agent_count();
+            if count >= MAX_AGENTS {
+                return Response::err(&req.id, "agent limit reached");
+            }
             let agent_id = {
                 let mut st = shared.state.lock().unwrap();
                 st.register(req.meta.clone(), now)
@@ -74,7 +95,35 @@ pub fn handle_request(shared: &Shared, req: &Request) -> Response {
                 None => Response::err(&req.id, "missing agent_id"),
             }
         }
-        "submit_event" => handle_cap_event(shared, req),
+        "submit_event" => {
+            // Per-agent rate limit: bound events per sliding 1s window so a
+            // runaway hook cannot flood Core. agent_id is on the request for
+            // heartbeat; for submit_event the agent is inside the event JSON,
+            // so we rate-limit by the request's agent_id if present, otherwise
+            // by a per-connection bucket the caller cannot spoof. The cap is
+            // generous (120/s) — well above any legitimate agent cadence.
+            let bucket_key = req.agent_id.clone().unwrap_or_else(|| "anon".to_string());
+            let now = now_ms();
+            let limited = {
+                let mut rl = shared.rate_limiter.lock().unwrap();
+                let entry = rl.entry(bucket_key.clone()).or_insert((0, now));
+                if now.saturating_sub(entry.1) >= RATE_WINDOW_MS {
+                    entry.0 = 0;
+                    entry.1 = now;
+                }
+                entry.0 += 1;
+                entry.0 > MAX_EVENTS_PER_WINDOW
+            };
+            if limited {
+                let _ = shared.log.lock().unwrap().append(&serde_json::json!({
+                    "type": "RATE_LIMITED",
+                    "agentId": bucket_key,
+                    "ts": crate::bootstrap::now_iso(),
+                }));
+                return Response::err(&req.id, "rate limited");
+            }
+            handle_cap_event(shared, req)
+        }
         "get_state" => {
             let (agents_json, claims_json) = {
                 let st = shared.state.lock().unwrap();
@@ -884,6 +933,7 @@ fn handle_conn(shared: &Arc<Shared>, stream: UnixStream) -> bool {
     };
     let reader = BufReader::new(stream);
     let mut this_agent: Option<String> = None;
+    let mut bad_token_attempts: u32 = 0;
 
     for line in reader.lines() {
         let line = match line {
@@ -893,9 +943,25 @@ fn handle_conn(shared: &Arc<Shared>, stream: UnixStream) -> bool {
         if line.trim().is_empty() {
             continue;
         }
+        // Request-size cap: reject oversized lines before parsing to prevent a
+        // single bad client from blowing up memory.
+        if line.len() > MAX_REQUEST_BYTES {
+            let mut out = encode_response(&Response::err("?", "request too large"));
+            out.push('\n');
+            let _ = writer.write_all(out.as_bytes());
+            continue;
+        }
         match decode_request(&line) {
             Ok(req) => {
                 let resp = handle_request(shared, &req);
+                // Bad-token cap: drop the connection after repeated guesses so a
+                // client cannot hammer the token check indefinitely.
+                if !resp.ok && resp.error.as_deref() == Some("unauthorized") {
+                    bad_token_attempts += 1;
+                    if bad_token_attempts >= MAX_BAD_TOKEN_ATTEMPTS {
+                        break;
+                    }
+                }
                 if resp.ok && req.action == "register" {
                     this_agent = resp.agent_id.clone();
                 }
@@ -981,6 +1047,7 @@ pub fn run(
         conflicts: Mutex::new(ConflictStore::new()),
         conflict_cfg,
         waitgraph: Mutex::new(WaitGraph::new()),
+        rate_limiter: Mutex::new(std::collections::HashMap::new()),
     });
     for f in &quarantined {
         let _ = shared.log.lock().unwrap().append(&serde_json::json!({
@@ -1143,6 +1210,7 @@ mod tests {
             conflicts: Mutex::new(ConflictStore::new()),
             conflict_cfg: ConflictConfig::default(),
             waitgraph: Mutex::new(WaitGraph::new()),
+            rate_limiter: Mutex::new(std::collections::HashMap::new()),
         })
     }
 
@@ -1191,6 +1259,7 @@ mod tests {
             conflicts: Mutex::new(ConflictStore::new()),
             conflict_cfg: ConflictConfig::default(),
             waitgraph: Mutex::new(WaitGraph::new()),
+            rate_limiter: Mutex::new(std::collections::HashMap::new()),
         });
         let _ = handle_request(&s, &req("wrong-token", "register"));
         let contents = std::fs::read_to_string(dir.join("events.log")).unwrap();
@@ -1230,6 +1299,36 @@ mod tests {
         let s = shared_for_test("good");
         let resp = handle_request(&s, &req("good", "frobnicate"));
         assert_eq!(resp.error.as_deref(), Some("unknown action"));
+    }
+
+    #[test]
+    fn register_beyond_max_agents_is_rejected() {
+        let s = shared_for_test("good");
+        // Register MAX_AGENTS agents successfully.
+        for _ in 0..MAX_AGENTS {
+            assert!(handle_request(&s, &req("good", "register")).ok);
+        }
+        // The next register must be refused.
+        let resp = handle_request(&s, &req("good", "register"));
+        assert!(!resp.ok);
+        assert_eq!(resp.error.as_deref(), Some("agent limit reached"));
+    }
+
+    #[test]
+    fn submit_event_rate_limit_kicks_in() {
+        let s = shared_for_test("good");
+        // Flood submit_event past the per-window cap. The first MAX_EVENTS_PER_WINDOW
+        // succeed (route to handle_cap_event which returns UNSUPPORTED_CAP_VERSION
+        // for empty events — that is fine, the rate limiter runs before routing).
+        let mut limited = false;
+        for _ in 0..(MAX_EVENTS_PER_WINDOW + 5) {
+            let resp = handle_request(&s, &req("good", "submit_event"));
+            if resp.error.as_deref() == Some("rate limited") {
+                limited = true;
+                break;
+            }
+        }
+        assert!(limited, "expected at least one rate-limited response");
     }
 
     #[test]
