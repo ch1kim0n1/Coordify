@@ -3,14 +3,13 @@
 # CI runs this on every push/PR (see .github/workflows/ci.yml).
 
 [advisories]
-# Fail the build on any advisory with severity >= medium. Yanked crates are
-# also flagged so a stale lockfile cannot ship a pulled version.
+# Deny yanked crates so a stale lockfile cannot ship a pulled version.
+# vulnerability/notice/unmaintained severity keys removed in cargo-deny 0.15
+# (see https://github.com/EmbarkStudios/cargo-deny/pull/611).
 db-path = "~/.cargo/advisory-dbs"
 db-urls = ["https://github.com/rustsec/advisory-db"]
-vulnerability = "deny"
-unmaintained = "workspace"
+version = 2
 yanked = "deny"
-notice = "warn"
 
 [licenses]
 # Coordify is MIT. Allow only permissive licenses in the dependency graph —
