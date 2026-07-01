@@ -83,7 +83,7 @@ jobs:
           echo 'npm install -g coordify-hook coordify-cli coordify-sim' >> /tmp/body.md
           echo '```' >> /tmp/body.md
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           body_path: /tmp/body.md
           draft: false
