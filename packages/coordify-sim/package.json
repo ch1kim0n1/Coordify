@@ -26,7 +26,7 @@
     "react": "^18.2.0"
   },
   "devDependencies": {
-    "@types/node": "^20.0.0",
+    "@types/node": "^26.1.0",
     "@types/react": "^18.2.0",
     "ink-testing-library": "^3.0.0",
     "tsx": "^4.7.0",
